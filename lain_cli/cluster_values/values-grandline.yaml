@@ -1,0 +1,36 @@
+registry: 625766999175.dkr.ecr.us-west-2.amazonaws.com
+registry_token_fetch_cmd: "aws ecr get-authorization-token --output text --query 'authorizationData[].authorizationToken'"
+registry_token_type: "Basic"
+registry_endpoint_use_https: yes
+
+domain: 0xgl.xyz
+
+######
+# Network load balancing on Amazon EKS
+# Ref: https://docs.aws.amazon.com/eks/latest/userguide/network-load-balancing.html
+#
+#serviceAnnotations:
+  #service.beta.kubernetes.io/aws-load-balancer-type: "external"
+  #service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+ # service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+######
+
+######
+# Application Load Balancing on Amazon EKS
+# Ref: https://docs.aws.amazon.com/eks/latest/userguide/alb-ingress.html
+#
+ingressClass: alb
+
+ingressAnnotations:
+  alb.ingress.kubernetes.io/target-type: ip
+
+externalIngressClass: alb
+
+externalIngressAnnotations:
+  alb.ingress.kubernetes.io/target-type: ip
+  alb.ingress.kubernetes.io/scheme: internet-facing
+
+#####
+
+extra_docs: >
+  GrandLine Production Cluster ，请参考 https://github.com/nftxyz/lain-cli/blob/master/lain_cli/cluster_values/grandline.md 生成配置
