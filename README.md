@@ -2,6 +2,10 @@
 
 ### Installation
 
+1. 参考[文档](https://github.com/nftxyz/gl-infra#connect-to-vpc-with-vpn)连接 grandline VPN
+
+2. 安装 lain
+
 ```sh
 pip install lain -i http://pypi.0xgl.xyz
 ```
