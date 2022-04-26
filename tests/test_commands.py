@@ -3,8 +3,18 @@ from os.path import isfile, join
 import pytest
 
 from lain_cli.lain import lain
-from lain_cli.utils import CLI_DIR, docker_save_name, ensure_absent, lain_meta, yalo
+from lain_cli.utils import (
+    CLI_DIR,
+    docker_save_name,
+    ensure_absent,
+    lain_meta,
+    yalo,
+    make_image_str,
+)
 from tests.conftest import (
+    TEST_CLUSTER_CONFIG,
+    DUMMY_IMAGE_TAG,
+    TEST_CLUSTER,
     CHART_DIR_NAME,
     DUMMY_APPNAME,
     DUMMY_IMAGE_TAG,
