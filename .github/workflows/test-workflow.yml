@@ -1,0 +1,26 @@
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  deploy-dummy:
+    runs-on: self-hosted
+    container:
+      image: 625766999175.dkr.ecr.us-west-2.amazonaws.com/lain
+
+    defaults:
+      run:
+        working-directory: tests/dummy
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - run: lain use grandline
+      - run: lain build
+      - run: lain push
+      - run: lain deploy
