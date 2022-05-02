@@ -6,7 +6,7 @@ on:
 
 jobs:
   deploy-dummy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, ubuntu]
     container:
       image: 625766999175.dkr.ecr.us-west-2.amazonaws.com/lain
 
