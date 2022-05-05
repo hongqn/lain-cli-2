@@ -10,22 +10,35 @@ ARG KUBECTL_VERSION=1.22.6
 WORKDIR /srv/lain
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tzdata locales gnupg2 curl jq ca-certificates && \
+    echo "Install basic packages" && \
+    apt-get install -y --no-install-recommends tzdata locales gnupg2 curl jq ca-certificates unzip && \
     dpkg-reconfigure --frontend=noninteractive locales && \
-    curl -LO https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-64bit.deb && \
-    dpkg -i trivy_${TRIVY_VERSION}_Linux-64bit.deb && \
+    echo "Install kubectl" && \
+    curl -LO https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl && \
+    echo "Install helm" && \
     curl -LO https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz && \
     tar -xvzf helm-v${HELM_VERSION}-linux-amd64.tar.gz && \
     mv linux-amd64/helm /usr/local/bin/helm && \
     chmod +x /usr/local/bin/helm && \
-    rm -rf linux-amd64 *.tar.gz *.deb && \
-    curl -LO https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl && \
-    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm -rf linux-amd64 *.tar.gz && \
+    echo "Install awscli" && \
+    curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    echo "Install trivy" && \
+    curl -LO https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-64bit.deb && \
+    dpkg -i trivy_${TRIVY_VERSION}_Linux-64bit.deb && \
+    rm *.deb && \
+    echo "Install utility softwares" && \
     apt-get install -y \
     docker docker-compose mysql-client mytop libmysqlclient-dev redis-tools iputils-ping dnsutils \
     zip zsh fasd silversearcher-ag telnet rsync vim lsof tree openssh-client apache2-utils git git-lfs && \
     chsh -s /usr/bin/zsh root && \
-    apt-get clean
+    echo "Clean up" && \
+    rm -rf /var/lib/apt/lists/*
+
 ADD docker-image/.pip /root/.pip
 COPY docker-image/git_askpass.sh /usr/local/bin/git_askpass.sh
 ENV GIT_ASKPASS=/usr/local/bin/git_askpass.sh
