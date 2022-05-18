@@ -186,29 +186,6 @@ spec:
             claimName: {{ $.Release.Name }}-{{ $pvcName }}
         {{- end }}
 
-{{- range $volume := $.Values.volumes }}
-{{- if $volume.autoPVC }}
----
-# ref: https://juicefs.com/docs/zh/csi/examples/dynamic-provisioning
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ $.Values.appname }}-{{ $volume.name }}
-  namespace: default
-spec:
-  accessModes:
-  {{- if hasKey . "accessModes" }}
-  {{- toYaml .accessModes | nindent 2 }}
-  {{- else }}
-  - ReadWriteMany
-  {{- end }}
-  resources:
-    requests:
-      storage: 10Pi
-  storageClassName: juicefs-sc
-{{- end }}
-{{- end }}
-
 {{- if $deployment.hpa }}
 ---
 # ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#horizontalpodautoscaler-v1-autoscaling
