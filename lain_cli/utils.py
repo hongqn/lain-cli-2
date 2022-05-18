@@ -1017,10 +1017,10 @@ def delete_canary_values():
 
 def tell_image_tag(image_tag=None):
     """really smart method to figure out which image_tag is the right one to deploy:
-        1. if image_tag isn't provided, obtain from lain_meta
-        2. check for existence against registry API
-        3. if the provided image_tag doesn't exist, print helpful suggestions
-        4. if no suggestions at all, give up and return None
+    1. if image_tag isn't provided, obtain from lain_meta
+    2. check for existence against registry API
+    3. if the provided image_tag doesn't exist, print helpful suggestions
+    4. if no suggestions at all, give up and return None
     """
     ctx = context()
     values = ctx.obj['values']
@@ -1437,6 +1437,13 @@ def parse_image_tag(image):
     return repo, tag
 
 
+def docker_tag(old, new):
+    if '@' in new:
+        new = new.split('@', 1)[0]
+
+    return docker('tag', old, new)
+
+
 def banyun(image, registry=None, overwrite_latest_tag=False, pull=False, exit=None):
     """搬运镜像到别人家里"""
     if registry and not isinstance(registry, str):
@@ -1467,11 +1474,11 @@ def banyun(image, registry=None, overwrite_latest_tag=False, pull=False, exit=No
     if pull:
         docker('pull', image)
 
-    docker('tag', image, new_image)
+    docker_tag(image, new_image)
     docker('push', new_image, exit=exit)
     if overwrite_latest_tag:
         latest_image = make_image_str(registry, appname, 'latest')
-        docker('tag', image, latest_image)
+        docker_tag(image, latest_image)
         docker('push', latest_image, exit=exit)
 
     if tag != 'prepare':
@@ -1503,7 +1510,7 @@ def docker_save(image, output_dir, retag=None, force=False, pull=False, exit=Fal
         else:
             new_image = f'{retag}:{tag}'
 
-        docker('tag', image, new_image)
+        docker_tag(image, new_image)
         image = new_image
 
     fname = docker_save_name(image)
@@ -1653,7 +1660,8 @@ def kubectl_version_challenge(check=True, autofix=True):
             error(f'{err}')
             return
         # https://kubernetes.io/releases/version-skew-policy/#kubectl
-        cr, sr = ensure_str(res.stdout).splitlines()
+        # output may contain kustomize version, we need to ignore
+        cr, *_, sr = ensure_str(res.stdout).splitlines()
         cv = version.parse(cr.rsplit(None, 1)[-1])
         # looks like v1.18.4-tke.13 / v1.20.4-aliyun.1
         sv = version.parse(sr.rsplit(None, 1)[-1].split('-', 1)[0])
