@@ -1,0 +1,12 @@
+{{- range $pvcName, $pvc := .Values.persistentVolumeClaims }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $.Release.Name }}-{{ $pvcName }}
+spec:
+  {{- if hasKey $pvc "useClusterSpec" }}
+  {{- toYaml (get $.Values.clusterPersistentVolumeClaims $pvc.useClusterSpec) | nindent 2 }}
+  {{- else }}
+  {{- toYaml $pvc | nindent 2 }}
+  {{- end }}
+{{- end }}
