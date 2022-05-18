@@ -26,6 +26,9 @@ appname: {{ appname }}
 # 不过在这里留空, 并不表示你的应用没有任何 volumes, 因为 lain 默认会赠送你 lain secret 的 volume, 写死在 helm chart 内了
 
 # 比方说, 如果你要挂载 JuiceFS, 那就需要先声明出 volumes, 然后让 SA 帮你把目录提前做好 mkdir + chown
+
+# 在 persistentVolumeClaims 里定义的 claim 都会自动创建一个同名的 volume ，不用在这里写了。
+
 # volumes:
 #   - name: jfs-backup-dir
 #     hostPath:
@@ -40,6 +43,19 @@ volumeMounts:
 #   # 如果你在 volumes 里声明了定制 volume, 那就需要写清楚 name 了
 #   - name: jfs-backup-dir  # name 就是 volumes 里声明的 volume name, 如果留空, 就是 lain secret
 #     mountPath: /jfs/backup/{{ appname }}/
+
+# 如果你使用了 PersistentVolume (SA 会告诉你是不是用了这个），那么需要在这里写上 persistentVolumeClaims 来声明使用
+# persistentVolumeClaims:
+#   my-pvc:
+#     accessModes:
+#       - ReadWriteMany
+#     resources:
+#       requests:
+#         storage: 10Pi
+#     storageClassName: my-sc
+#  # SA 也许已经帮你定义好了一些 PVC spec ，你直接用即可
+#  cluster-pvc:
+#    useClusterSpec: awesome-pvc
 
 # deployments 描述了你的应用有哪些进程 (lain 的世界里叫做 proc), 以及这些进程如何启动, 需要占用多少资源
 deployments:
