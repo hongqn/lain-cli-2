@@ -1,7 +1,8 @@
 on:
   push:
-    branches:
-      - master
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 env:
   AWS_REGION: us-west-2
@@ -29,6 +30,21 @@ jobs:
           -t ${{ steps.ecr.outputs.repository-uri }}
           --build-arg BASE=${{ steps.login-ecr.outputs.registry }}/python:3.10
 
+      - name: Calculate tag name
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        id: tag
+        run: echo ::set-output name=tag::${GITHUB_REF_NAME:1}
+
+      - name: Tag
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: >
+          docker tag
+          ${{ steps.ecr.outputs.repository-uri }}
+          ${{ steps.ecr.outputs.repository-uri }}:${{ steps.tag.outputs.tag }}
+
       - name: Push
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         run: docker push ${{ steps.ecr.outputs.repository-uri }}
+
+      - name: Push with tag
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: docker push ${{ steps.ecr.outputs.repository-uri }}:${{ steps.tag.outputs.tag }}
