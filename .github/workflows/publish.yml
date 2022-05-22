@@ -37,6 +37,6 @@ jobs:
       - name: Publish distribution 📦 to Internal PyPI
         uses: pypa/gh-action-pypi-publish@master
         with:
-          repository_url: http://pypi.0xgl.xyz/
+          repository_url: https://pypi.0xgl.xyz/
           user: grandline
           password: ${{ secrets.PYPI_PASSWORD }}
