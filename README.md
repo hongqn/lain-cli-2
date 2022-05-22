@@ -7,7 +7,7 @@
 2. 安装 lain
 
 ```sh
-pip install lain -i http://pypi.0xgl.xyz
+pip install lain -i https://pypi.0xgl.xyz
 ```
 
 如果提示输入用户名密码，请在 1pwd 搜索 `pypi.0xgl.xyz`
@@ -34,10 +34,10 @@ lain is a DevOps solution, but really, it just helps you with kubectl / helm / d
 
 The recommended way to use lain is to [maintain an internal fork for your team](https://lain-cli.readthedocs.io/en/latest/dev.html#lain), this may be too much, you can still try out lain with the following steps:
 
-* Install from PyPI: `pip install -U lain`
-* Write cluster values, according to docs [here](https://lain-cli.readthedocs.io/en/latest/dev.html#cluster-values), and examples [here](https://github.com/timfeirg/lain-cli/tree/master/lain_cli/cluster_values), so that lain knows how to talk to your Kubernetes cluster
-* Set `CLUSTER_VALUES_DIR` to the directory that contains all your cluster values
-* Start using lain
+- Install from PyPI: `pip install -U lain`
+- Write cluster values, according to docs [here](https://lain-cli.readthedocs.io/en/latest/dev.html#cluster-values), and examples [here](https://github.com/timfeirg/lain-cli/tree/master/lain_cli/cluster_values), so that lain knows how to talk to your Kubernetes cluster
+- Set `CLUSTER_VALUES_DIR` to the directory that contains all your cluster values
+- Start using lain
 
 ## Links
 
