@@ -56,7 +56,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.parser import ParserError
 from ruamel.yaml.scalarstring import LiteralScalarString
 
-from lain_cli import __version__
+from lain_cli import __version__, package_name
 
 yaml = YAML()
 ENV = os.environ.copy()
@@ -1441,7 +1441,8 @@ def docker_tag(old, new):
     if '@' in new:
         new = new.split('@', 1)[0]
 
-    return docker('tag', old, new)
+    docker('tag', old, new)
+    return new
 
 
 def banyun(image, registry=None, overwrite_latest_tag=False, pull=False, exit=None):
@@ -1474,7 +1475,7 @@ def banyun(image, registry=None, overwrite_latest_tag=False, pull=False, exit=No
     if pull:
         docker('pull', image)
 
-    docker_tag(image, new_image)
+    new_image = docker_tag(image, new_image)
     docker('push', new_image, exit=exit)
     if overwrite_latest_tag:
         latest_image = make_image_str(registry, appname, 'latest')
@@ -1510,8 +1511,7 @@ def docker_save(image, output_dir, retag=None, force=False, pull=False, exit=Fal
         else:
             new_image = f'{retag}:{tag}'
 
-        docker_tag(image, new_image)
-        image = new_image
+        image = docker_tag(image, new_image)
 
     fname = docker_save_name(image)
     output_path = join(output_dir, fname)
@@ -2805,7 +2805,7 @@ def version_challenge():
         selection_prefs=selection_prefs,
         use_deprecated_html5lib=False,
     )
-    best_candidate = finder.find_best_candidate('lain_cli').best_candidate
+    best_candidate = finder.find_best_candidate(package_name).best_candidate
     debug(f'best candidate: {best_candidate}')
     if not best_candidate:
         warn(f'fail to lookup latest version from {pypi_index}')
@@ -2817,7 +2817,7 @@ def version_challenge():
     if not all(
         [now.major == new.major, now.minor == new.minor, new.micro - now.micro <= 2]
     ):
-        error(f'you are using lain_cli=={__version__}, upgrade before use:')
+        error(f'you are using {package_name}=={__version__}, upgrade before use:')
         extra_index = cc.get('pypi_extra_index')
         if extra_index:
             extra_clause = f'--extra-index-url {extra_index}'
@@ -2825,7 +2825,7 @@ def version_challenge():
             extra_clause = ''
 
         error('workon lain-cli')
-        error(f'pip install -U lain_cli=={new} -i {pypi_index} {extra_clause}')
+        error(f'pip install -U {package_name}=={new} -i {pypi_index} {extra_clause}')
         error('you can use --ignore-lint to bypass this check', exit=1)
 
 
