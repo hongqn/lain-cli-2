@@ -27,12 +27,7 @@ ingressAnnotations:
   alb.ingress.kubernetes.io/target-type: ip
   alb.ingress.kubernetes.io/group.name: lain-internal
 
-externalIngressClass: alb
-
-externalIngressAnnotations:
-  alb.ingress.kubernetes.io/target-type: ip
-  alb.ingress.kubernetes.io/scheme: internet-facing
-  alb.ingress.kubernetes.io/group.name: lain-external
+externalIngressClass: nginx
 
 #####
 
