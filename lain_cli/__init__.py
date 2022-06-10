@@ -1,2 +1,2 @@
-__version__ = '4.10.39.1'
+__version__ = '4.10.39.2'
 package_name = 'lain'
