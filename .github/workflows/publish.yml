@@ -40,3 +40,10 @@ jobs:
           repository_url: https://pypi.0xgl.xyz/
           user: grandline
           password: ${{ secrets.PYPI_PASSWORD }}
+
+      - name: Announce
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        uses: Ilshidur/action-discord@master
+        with:
+          args: '[{{ EVENT_PAYLOAD.repository.full_name }} {{ github.ref_name}}]({{ github.server_url }}/{{ github.repository }}/releases/tag/{{ github.ref_name }}) has been published.'
