@@ -49,7 +49,7 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         uses: Ilshidur/action-discord@master
         with:
-          args: '[${{ EVENT_PAYLOAD.repository.full_name }} ${{ github.ref_name}}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}) has been published.'
+          args: '[{{ EVENT_PAYLOAD.repository.full_name }} ${{ github.ref_name}}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}) has been published.'
 
   build-and-push-image:
     runs-on: [self-hosted, linux, x64, ubuntu]
