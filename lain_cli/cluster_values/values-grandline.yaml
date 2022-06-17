@@ -9,6 +9,7 @@ domain: 0xgl.xyz
 
 ingressClass: nginx-internal
 externalIngressClass: nginx-external
+supportsIngressClassName: true
 clusterIssuer: letsencrypt-dns01
 
 extra_docs: >
