@@ -20,10 +20,17 @@ aws configure
 aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 625766999175.dkr.ecr.us-west-2.amazonaws.com
 ```
 
-4. 生成 ~/.kube/kubeconfig-grandline :
+4. 生成 ~/.kube/kubeconfig-grandline:
 
 ```sh
 aws eks update-kubeconfig --name prod --region us-west-2 --kubeconfig ~/.kube/kubeconfig-grandline
+```
+
+5. 生成 ~/.kube/kubeconfig-test:
+
+```
+cp ~/.kube/kubeconfig-grandline ~/.kube/kubeconfig-test
+lain use --set-context test
 ```
 
 ## 注意

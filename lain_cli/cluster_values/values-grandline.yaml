@@ -14,12 +14,3 @@ clusterIssuer: letsencrypt-dns01
 
 extra_docs: >
   GrandLine Production Cluster ，请参考 https://github.com/nftxyz/lain-cli/blob/master/lain_cli/cluster_values/grandline.md 生成配置
-
-clusterPersistentVolumeClaims:
-  juicefs:
-    accessModes:
-      - ReadWriteMany
-    resources:
-      requests:
-        storage: 10Pi
-    storageClassName: juicefs-sc
