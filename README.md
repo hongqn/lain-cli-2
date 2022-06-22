@@ -14,7 +14,7 @@ pip install lain -i https://pypi.0xgl.xyz
 
 3. 参考[集群配置文档](lain_cli/cluster_values/grandline.md)所属安装依赖和进行配置
 
-4. 参考下面的 Upstream README ，使用 lain 。集群名为 `grandline` ，例如
+4. 参考下面的 Upstream README ，使用 lain 。集群名为 `grandline` 或 `test` ，例如
 
 ```sh
 lain use grandline
