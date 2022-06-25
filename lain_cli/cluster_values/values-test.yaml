@@ -1,4 +1,4 @@
-pypi_index: https://pypi.0xgl.xyz
+pypi_index: https://pypi.0xgl.xyz/simple/
 
 registry: 625766999175.dkr.ecr.us-west-2.amazonaws.com
 registry_token_fetch_cmd: "aws ecr get-authorization-token --output text --query 'authorizationData[].authorizationToken'"
