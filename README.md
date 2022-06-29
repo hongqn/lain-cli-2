@@ -20,7 +20,14 @@ pip install lain -i https://pypi.0xgl.xyz
 lain use grandline
 ```
 
-Upstream README:
+### Domains
+
+|            | grandline 集群（生产环境）              | test 集群（测试环境） |
+| ---------- | --------------------------------------- | --------------------- |
+| 外网可访问 | `0xnftsee.xyz`, `uninvitedelephant.xyz` | `gl-test.xyz`         |
+| 仅内网访问 | `0xgl.xyz`                              | `test.0xgl.xyz`       |
+
+# Upstream README:
 
 ---
 
