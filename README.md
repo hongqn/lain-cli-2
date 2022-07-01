@@ -27,6 +27,8 @@ lain use grandline
 | 外网可访问 | `0xnftsee.xyz`, `uninvitedelephant.xyz` | `gl-test.xyz`         |
 | 仅内网访问 | `0xgl.xyz`                              | `test.0xgl.xyz`       |
 
+只支持一级子域名，如 `ue.gl-test.xyz` 这样的形式，不支持多级子域名，如 `bot.ue.gl-test.xyz` 。
+
 # Upstream README:
 
 ---
