@@ -12,5 +12,8 @@ externalIngressClass: nginx-external
 supportsIngressClassName: true
 clusterIssuer: letsencrypt-dns01
 
+prometheus: https://prometheus.0xgl.xyz
+grafana_url: https://grafana.0xgl.xyz/d/7sl4vJAZk/container-monitoring
+
 extra_docs: >
   GrandLine Production Cluster ，请参考 https://github.com/nftxyz/lain-cli/blob/master/lain_cli/cluster_values/grandline.md 生成配置
