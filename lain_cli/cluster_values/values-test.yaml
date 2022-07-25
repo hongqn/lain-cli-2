@@ -14,6 +14,16 @@ supportsIngressClassName: true
 clusterIssuer: letsencrypt-dns01
 
 prometheus: https://prometheus.0xgl.xyz
+pql_template:
+  cpu: |
+    max(rate(container_cpu_user_seconds_total{{container!="sandbox",pod=~"{appname}-{proc_name}-[[:alnum:]]+-.+"}}[{range}]) * 1000)
+  memory_quantile: |
+    max(
+      quantile_over_time(0.99,
+      container_memory_usage_bytes{{container!="sandbox",pod=~"{appname}-{proc_name}-[[:alnum:]]+-.+"}}[{range}]
+    ) - quantile_over_time(0.99,
+      container_memory_cache{{container!="sandbox",pod=~"{appname}-{proc_name}-[[:alnum:]]+-.+"}}[{range}]
+    ))
 grafana_url: https://grafana.0xgl.xyz/d/7sl4vJAZk/container-monitoring
 
 extra_docs: >
