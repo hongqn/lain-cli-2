@@ -92,7 +92,7 @@
       "pluginVersion": "8.2.2",
       "targets": [
         {
-          "expr": "count(container_last_seen{container!=\"sandbox\",pod=~\"[[label_app]].*\",container=~\".+\"})",
+          "expr": "count(container_last_seen{container!=\"sandbox\",namespace=~\"[[namespace]]\",pod=~\"[[label_app]].*\",container=~\".+\"})",
           "interval": "",
           "intervalFactor": 2,
           "legendFormat": "",
@@ -169,7 +169,7 @@
       "pluginVersion": "8.2.2",
       "targets": [
         {
-          "expr": "sum(container_memory_usage_bytes{container!=\"sandbox\",pod=~\"[[label_app]].*\",container=~\".+\"})",
+          "expr": "sum(container_memory_usage_bytes{container!=\"sandbox\",namespace=\"[[namespace]]\",pod=~\"[[label_app]].*\",container=~\".+\"})",
           "interval": "",
           "intervalFactor": 2,
           "legendFormat": "",
@@ -246,7 +246,7 @@
       "pluginVersion": "8.2.2",
       "targets": [
         {
-          "expr": "sum(rate(container_cpu_user_seconds_total{container!=\"sandbox\",pod=~\"[[label_app]].*\",container=~\".+\"}[5m]) * 100)",
+          "expr": "sum(rate(container_cpu_user_seconds_total{container!=\"sandbox\",namespace=\"[[namespace]]\",pod=~\"[[label_app]].*\",container=~\".+\"}[5m]) * 100)",
           "interval": "",
           "intervalFactor": 2,
           "legendFormat": "",
@@ -316,7 +316,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(container_cpu_user_seconds_total{container!=\"sandbox\",pod=~\"[[label_app]].*\",container=~\".+\"}[5m]) * 100",
+          "expr": "rate(container_cpu_user_seconds_total{container!=\"sandbox\",namespace=\"[[namespace]]\",pod=~\"[[label_app]].*\",container=~\".+\"}[5m]) * 100",
           "interval": "",
           "intervalFactor": 2,
           "legendFormat": "{{pod}}",
@@ -427,7 +427,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "container_memory_usage_bytes{container!=\"sandbox\",pod=~\"[[label_app]].*\",container=~\".+\"} - container_memory_cache{container!=\"sandbox\",pod=~\"[[label_app]].*\",container=~\".+\"}",
+          "expr": "container_memory_usage_bytes{container!=\"sandbox\",namespace=\"[[namespace]]\",pod=~\"[[label_app]].*\",container=~\".+\"} - container_memory_cache{container!=\"sandbox\",namespace=\"[[namespace]]\",pod=~\"[[label_app]].*\",container=~\".+\"}",
           "hide": false,
           "interval": "",
           "intervalFactor": 2,
@@ -533,7 +533,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "irate(container_network_receive_bytes_total{pod=~\"[[label_app]].*\"}[5m])",
+          "expr": "irate(container_network_receive_bytes_total{namespace=\"[[namespace]]\",pod=~\"[[label_app]].*\"}[5m])",
           "interval": "",
           "intervalFactor": 2,
           "legendFormat": "{{pod}}",
@@ -637,7 +637,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "irate(container_network_transmit_bytes_total{pod=~\"[[label_app]].*\"}[5m])",
+          "expr": "irate(container_network_transmit_bytes_total{namespace=\"[[namespace]]\",pod=~\"[[label_app]].*\"}[5m])",
           "interval": "",
           "intervalFactor": 2,
           "legendFormat": "{{pod}}",
@@ -713,6 +713,27 @@
           }
         ],
         "query": "grafana",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "default",
+          "value": "default"
+        },
+        "description": null,
+        "error": null,
+        "hide": 0,
+        "name": "namespace",
+        "options": [
+          {
+            "selected": true,
+            "text": "default",
+            "value": "default"
+          }
+        ],
+        "query": "default",
         "skipUrlSync": false,
         "type": "textbox"
       }
