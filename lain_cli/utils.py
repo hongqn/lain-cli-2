@@ -588,7 +588,8 @@ def tell_grafana_url():
     cc = tell_cluster_config()
     grafana_url = cc.get('grafana_url')
     if grafana_url:
-        return f'{grafana_url}?orgId=1&refresh=10s&var-label_app={release_name}'
+        namespace = cc.get('namespace', 'default')
+        return f'{grafana_url}?orgId=1&refresh=10s&var-label_app={release_name}&var-namespace={namespace}'
 
 
 def open_kibana_url(release_name=None, proc=None):
