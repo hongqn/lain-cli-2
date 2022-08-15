@@ -1,11 +1,12 @@
 pypi_index: https://pypi.0xgl.xyz/simple/
 
-registry: 785797848339.dkr.ecr.us-west-2.amazonaws.com
+registry: 625766999175.dkr.ecr.us-west-2.amazonaws.com
 registry_token_fetch_cmd: "aws ecr get-authorization-token --output text --query 'authorizationData[].authorizationToken'"
 registry_token_type: "Basic"
 registry_endpoint_use_https: yes
 
-domain: 0xgl.xyz
+namespace: test
+domain: test.0xgl.xyz
 
 ingressClass: nginx-internal
 externalIngressClass: nginx-external
@@ -16,4 +17,4 @@ prometheus: https://prometheus.0xgl.xyz
 grafana_url: https://grafana.0xgl.xyz/d/7sl4vJAZk/container-monitoring
 
 extra_docs: >
-  GrandLine Production Cluster ，请参考 https://github.com/nftxyz/lain-cli/blob/master/lain_cli/cluster_values/grandline.md 生成配置
+  GrandLine Test Cluster ，请参考 https://github.com/nftxyz/lain-cli/blob/master/lain_cli/cluster_values/grandline.md 生成配置
