@@ -177,8 +177,10 @@ lazy-object-proxy==1.7.1
     # via astroid
 locust==2.9.0
     # via -r docker-image/requirements.in
-mako==1.2.0
-    # via alembic
+mako==1.2.3
+    # via
+    #   -r docker-image/requirements.in
+    #   alembic
 markupsafe==2.1.1
     # via
     #   jinja2

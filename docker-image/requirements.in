@@ -17,5 +17,8 @@ twine
 pylint
 semgrep
 alembic
+# alembic depends on mako without version restriction.
+# However, mako<1.2.2 has high severity CVE-2022-40023
+mako>=1.2.2
 sphinx
 furo
