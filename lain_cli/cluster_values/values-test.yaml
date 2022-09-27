@@ -13,8 +13,19 @@ externalIngressClass: nginx-external
 supportsIngressClassName: true
 clusterIssuer: letsencrypt-dns01
 
-#prometheus: https://prometheus.0xgl.xyz
-#grafana_url: https://grafana.0xgl.xyz/d/7sl4vJAZk/container-monitoring
+prometheus: https://prometheus.0xgl.xyz
+pql_template:
+  cpu: |
+    max(rate(container_cpu_user_seconds_total{{namespace="test",container!="sandbox",pod=~"{appname}-{proc_name}-[[:alnum:]]+-.+"}}[{range}]) * 1000)
+  memory_quantile: |
+    max(
+      quantile_over_time(0.99,
+      container_memory_usage_bytes{{namespace="test",container!="sandbox",pod=~"{appname}-{proc_name}-[[:alnum:]]+-.+"}}[{range}]
+    ) - quantile_over_time(0.99,
+      container_memory_cache{{namespace="test",container!="sandbox",pod=~"{appname}-{proc_name}-[[:alnum:]]+-.+"}}[{range}]
+    ))
+
+grafana_url: https://grafana.0xgl.xyz/d/7sl4vJAZk/container-monitoring
 
 extra_docs: >
   GrandLine Test Cluster ，请参考 https://github.com/nftxyz/lain-cli/blob/master/lain_cli/cluster_values/grandline.md 生成配置
