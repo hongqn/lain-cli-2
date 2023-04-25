@@ -1,5 +1,4 @@
 repos:
-
   - repo: meta
     hooks:
       - id: check-hooks-apply
@@ -17,7 +16,7 @@ repos:
     rev: 22.3.0
     hooks:
       - id: black
-        args: ['--skip-string-normalization']
+        args: ["--skip-string-normalization"]
 
   - repo: https://github.com/jendrikseipp/vulture
     rev: v2.3
@@ -27,7 +26,7 @@ repos:
         args:
           - lain_cli
 
-  - repo: https://gitlab.com/pycqa/flake8
+  - repo: https://github.com/PyCQA/flake8
     rev: 4.0.1
     hooks:
       - id: flake8
@@ -55,9 +54,4 @@ repos:
         types: [python]
         entry: python -m pylint.__main__
         language: system
-        args:
-          [
-            "-rn",
-            "-sn",
-            "--rcfile=pylintrc",
-          ]
+        args: ["-rn", "-sn", "--rcfile=pylintrc"]
