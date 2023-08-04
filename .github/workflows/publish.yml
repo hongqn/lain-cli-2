@@ -38,7 +38,7 @@ jobs:
           .
 
       - name: Publish distribution 📦 to Internal PyPI
-        uses: pypa/gh-action-pypi-publish@master
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository_url: https://pypi.0xgl.xyz/
           user: grandline
@@ -49,7 +49,7 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         uses: Ilshidur/action-discord@master
         with:
-          args: '[{{ EVENT_PAYLOAD.repository.full_name }} ${{ github.ref_name}}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}) has been published.'
+          args: "[{{ EVENT_PAYLOAD.repository.full_name }} ${{ github.ref_name}}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}) has been published."
 
   build-and-push-image:
     runs-on: [self-hosted, linux, x64, ubuntu]
@@ -76,7 +76,7 @@ jobs:
       - name: Calculate tag name
         if: github.event_name == 'push' && github.ref_type == 'tag'
         id: tag
-        run: echo ::set-output name=tag::${GITHUB_REF_NAME:1}
+        run: echo "tag=${GITHUB_REF_NAME:1}" >> $GITHUB_OUTPUT
 
       - name: Tag
         if: github.event_name == 'push' && github.ref_type == 'tag'
