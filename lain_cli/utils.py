@@ -2853,7 +2853,7 @@ def version_challenge():
     if not cc:
         return
     pypi_index = cc['pypi_index']
-    search_scope = SearchScope.create(find_links=[], index_urls=[pypi_index])
+    search_scope = SearchScope.create(find_links=[], index_urls=[pypi_index], no_index=False)
     link_collector = LinkCollector(session=session, search_scope=search_scope)
     selection_prefs = SelectionPreferences(
         allow_yanked=False,

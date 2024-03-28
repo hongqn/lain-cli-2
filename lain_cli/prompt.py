@@ -278,13 +278,11 @@ Title = partial(FormattedTextControl, style='fg:GreenYellow')
 
 async def refresh_content():
     while True:
-        await asyncio.wait(
-            [
-                refresh_pod_text(),
-                refresh_ingress_text(),
-                refresh_podinfo_text(),
-                refresh_top_text(),
-            ]
+        await asyncio.gather(
+            refresh_pod_text(),
+            refresh_ingress_text(),
+            refresh_podinfo_text(),
+            refresh_top_text(),
         )
         get_app().invalidate()
         await asyncio.sleep(0.1)
