@@ -1697,7 +1697,7 @@ def fix_kubectl(cv=None, sv=None):
 def kubectl_version_challenge(check=True, autofix=True):
     try:
         res = subprocess_run(
-            ['kubectl', 'version', '--short'],
+            ['kubectl', 'version'],
             capture_output=True,
             env=ENV,
             silent=True,
