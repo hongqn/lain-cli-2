@@ -22,20 +22,20 @@ class AliyunRegistry(RegistryUtils):
     ):
         if not all([access_key_id, access_key_secret, registry]):
             cc = tell_cluster_config()
-            access_key_id = cc.get('access_key_id')
-            access_key_secret = cc.get('access_key_secret')
+            access_key_id = cc.get("access_key_id")
+            access_key_secret = cc.get("access_key_secret")
             if not all([access_key_id, access_key_secret]):
                 raise ValueError(
-                    'access_key_id, access_key_secret not provided in cluster config'
+                    "access_key_id, access_key_secret not provided in cluster config"
                 )
             if not registry:
-                registry = cc['registry']
+                registry = cc["registry"]
 
-        _, region_id, _, _, repo_namespace = re.split(r'[\./]', registry)
-        self.registry = f'registry.{region_id}.aliyuncs.com/{repo_namespace}'
+        _, region_id, _, _, repo_namespace = re.split(r"[\./]", registry)
+        self.registry = f"registry.{region_id}.aliyuncs.com/{repo_namespace}"
         self.acs_client = AcsClient(access_key_id, access_key_secret, region_id)
         self.repo_namespace = repo_namespace
-        self.endpoint = f'cr.{region_id}.aliyuncs.com'
+        self.endpoint = f"cr.{region_id}.aliyuncs.com"
 
     def list_tags(self, repo_name, **kwargs):
         request = GetRepoTagsRequest.GetRepoTagsRequest()
@@ -49,9 +49,9 @@ class AliyunRegistry(RegistryUtils):
             if e.http_status == 404:
                 return None
             if e.http_status == 400:
-                warn(f'error during aliyun api query: {e}')
+                warn(f"error during aliyun api query: {e}")
                 return None
             raise
-        tags_data = jalo(response)['data']['tags']
-        tags = self.sort_and_filter((d['tag'] for d in tags_data), n=kwargs.get('n'))
+        tags_data = jalo(response)["data"]["tags"]
+        tags = self.sort_and_filter((d["tag"] for d in tags_data), n=kwargs.get("n"))
         return tags

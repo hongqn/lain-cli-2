@@ -11,6 +11,6 @@ with open(target) as f:
     content = yaml.load(f.read())
 
 os.unlink(target)
-content['data']['SURPRISE'] = os.environ['PWD']
-with open(target, 'w') as f:
+content["data"]["SURPRISE"] = os.environ["PWD"]
+with open(target, "w") as f:
     yaml.dump(content, f)
