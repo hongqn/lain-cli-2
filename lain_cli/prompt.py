@@ -32,14 +32,14 @@ from lain_cli.utils import (
     template_env,
 )
 
-DEFAULT_POD_TEXT = 'no weird pods found'
+DEFAULT_POD_TEXT = "no weird pods found"
 CONTENT_VENDERER = {
-    'podinfo_text': '',
-    'ingress_text': '',
-    'pod_text': '',
-    'top_text': '',
-    'pods': [],
-    'node_text': '',
+    "podinfo_text": "",
+    "ingress_text": "",
+    "pod_text": "",
+    "top_text": "",
+    "pods": [],
+    "node_text": "",
 }
 POD_WITH_EMPTY_LOG = TTLCache(ttl=20, maxsize=1024)
 POD_WITH_GOOD_EVENTS = TTLCache(ttl=20, maxsize=1024)
@@ -57,27 +57,27 @@ async def refresh_podinfo_text():
     * if events are good, show logs
     * if logs are empty, show events
     """
-    pods = CONTENT_VENDERER['pods']
+    pods = CONTENT_VENDERER["pods"]
     if not pods:
-        CONTENT_VENDERER['podinfo_text'] = DEFAULT_POD_TEXT
+        CONTENT_VENDERER["podinfo_text"] = DEFAULT_POD_TEXT
         return
     cmd = []
     for podline in pods[1:]:
         pod_name, ready_str, status, restarts, age, *_ = parse_podline(podline)
-        if status == 'Completed':
+        if status == "Completed":
             continue
         age = parse_multi_timespan(age)
         event_cmd = [
-            'get',
-            'events',
-            f'--field-selector=involvedObject.name={pod_name}',
+            "get",
+            "events",
+            f"--field-selector=involvedObject.name={pod_name}",
         ]
-        log_cmd = ['logs', '--tail=50', f'{pod_name}']
-        if status in {'Pending', 'ContainerCreating'} and age > 30:
+        log_cmd = ["logs", "--tail=50", f"{pod_name}"]
+        if status in {"Pending", "ContainerCreating"} and age > 30:
             cmd = event_cmd
             break
         if (
-            status == 'CrashLoopBackOff'
+            status == "CrashLoopBackOff"
             or not parse_ready(ready_str)
             or int(restarts) > 0
         ):
@@ -92,74 +92,74 @@ async def refresh_podinfo_text():
     if cmd:
         res = kubectl(*cmd, capture_output=True, check=False)
         info = (ensure_str(res.stdout) or ensure_str(res.stderr)).strip()
-        CONTENT_VENDERER['podinfo_text'] = info
-        if cmd[1] == 'logs':
+        CONTENT_VENDERER["podinfo_text"] = info
+        if cmd[1] == "logs":
             if not info:
                 POD_WITH_EMPTY_LOG[pod_name] = 1
 
-        elif cmd[1] == 'events':
+        elif cmd[1] == "events":
             latest_event = info.splitlines()[-1]
             # 101s        Normal   Started pod/xxx Started container xxx
             _, level, state, *_ = latest_event.split()
-            if level == 'Normal' and state == 'Started':
+            if level == "Normal" and state == "Started":
                 POD_WITH_GOOD_EVENTS[pod_name] = 1
 
         return
 
-    CONTENT_VENDERER['podinfo_text'] = DEFAULT_POD_TEXT
+    CONTENT_VENDERER["podinfo_text"] = DEFAULT_POD_TEXT
 
 
 def build_app_status_command():
     ctx = context()
-    appname = ctx.obj['appname']
+    appname = ctx.obj["appname"]
     pod_cmd = [
-        'get',
-        'pod',
-        '-owide',
+        "get",
+        "pod",
+        "-owide",
         # add this sort so that abnormal pods appear on top
-        '--sort-by={.status.phase}',
-        '-lapp.kubernetes.io/name={appname}',
+        "--sort-by={.status.phase}",
+        "-lapp.kubernetes.io/name={appname}",
     ]
-    ctx.obj['watch_pod_command'] = pod_cmd
+    ctx.obj["watch_pod_command"] = pod_cmd
     if tell_pods_count() > 13:
-        ctx.obj['too_many_pods'] = True
-        ctx.obj[
-            'watch_pod_title'
-        ] = f'(digested, only showing weird pods) k {list2cmdline(pod_cmd)}'
+        ctx.obj["too_many_pods"] = True
+        ctx.obj["watch_pod_title"] = (
+            f"(digested, only showing weird pods) k {list2cmdline(pod_cmd)}"
+        )
     else:
-        ctx.obj['too_many_pods'] = False
-        ctx.obj['watch_pod_title'] = f'k {list2cmdline(pod_cmd)}'
+        ctx.obj["too_many_pods"] = False
+        ctx.obj["watch_pod_title"] = f"k {list2cmdline(pod_cmd)}"
 
-    top_cmd = ['top', 'po', '-l', f'app.kubernetes.io/name={appname}']
-    ctx.obj['watch_top_command'] = top_cmd
-    if ctx.obj['too_many_pods']:
-        ctx.obj['watch_top_title'] = f'(digested) k {list2cmdline(top_cmd)}'
+    top_cmd = ["top", "po", "-l", f"app.kubernetes.io/name={appname}"]
+    ctx.obj["watch_top_command"] = top_cmd
+    if ctx.obj["too_many_pods"]:
+        ctx.obj["watch_top_title"] = f"(digested) k {list2cmdline(top_cmd)}"
     else:
-        ctx.obj['watch_top_title'] = f'k {list2cmdline(top_cmd)}'
+        ctx.obj["watch_top_title"] = f"k {list2cmdline(top_cmd)}"
 
 
 def pod_text(too_many_pods=None):
     ctx = context()
-    appname = ctx.obj['appname']
+    appname = ctx.obj["appname"]
     if too_many_pods is None:
-        too_many_pods = ctx.obj['too_many_pods']
+        too_many_pods = ctx.obj["too_many_pods"]
 
     res, pods = get_pods(
         appname=appname, headers=True, show_only_bad_pods=too_many_pods
     )
     if rc(res):
         return ensure_str(res.stderr)
-    CONTENT_VENDERER['pods'] = pods
-    report = '\n'.join(pods)
+    CONTENT_VENDERER["pods"] = pods
+    report = "\n".join(pods)
     return report
 
 
 async def refresh_pod_text():
-    set_content('pod_text', pod_text())
+    set_content("pod_text", pod_text())
 
 
 async def refresh_top_text():
-    set_content('top_text', top_text())
+    set_content("top_text", top_text())
 
 
 def kubectl_top_digest(stdout):
@@ -167,32 +167,32 @@ def kubectl_top_digest(stdout):
     procs_group = defaultdict(list)
     for l in lines[1:]:
         pod_name, cpu, memory = l.split()
-        if memory.startswith('0'):
+        if memory.startswith("0"):
             continue
         deploy_name = tell_pod_deploy_name(pod_name)
         procs_group[deploy_name].append(
-            {'memory': parse_size(memory), 'cpu': parse_kubernetes_cpu(cpu), 'line': l}
+            {"memory": parse_size(memory), "cpu": parse_kubernetes_cpu(cpu), "line": l}
         )
 
     pods_digest = set()
     for pods in procs_group.values():
-        by_cpu = sorted(pods, key=itemgetter('cpu'))
-        pods_digest |= {by_cpu[0]['line'], by_cpu[-1]['line']}
-        by_mem = sorted(pods, key=itemgetter('memory'))
-        pods_digest |= {by_mem[0]['line'], by_mem[-1]['line']}
+        by_cpu = sorted(pods, key=itemgetter("cpu"))
+        pods_digest |= {by_cpu[0]["line"], by_cpu[-1]["line"]}
+        by_mem = sorted(pods, key=itemgetter("memory"))
+        pods_digest |= {by_mem[0]["line"], by_mem[-1]["line"]}
 
-    report = '\n'.join(lines[0:0] + sorted(list(pods_digest)))
+    report = "\n".join(lines[0:0] + sorted(list(pods_digest)))
     return report
 
 
 def top_text(too_many_pods=None):
     """display kubectl top results"""
     ctx = context()
-    cmd = ctx.obj['watch_top_command']
+    cmd = ctx.obj["watch_top_command"]
     res = kubectl(*cmd, timeout=9, capture_output=True, check=False)
     stdout = ensure_str(res.stdout)
     if too_many_pods is None:
-        too_many_pods = ctx.obj['too_many_pods']
+        too_many_pods = ctx.obj["too_many_pods"]
 
     if stdout and too_many_pods:
         report = kubectl_top_digest(stdout)
@@ -210,47 +210,47 @@ def test_url(url):
     return res
 
 
-ingress_text_str = '''{% for res in results %}
+ingress_text_str = """{% for res in results %}
 {% if res.status is defined %}
 {{ res.url }}   {{ res.status }}   {{ res.text | brief }}
 {% endif %}
 {% endfor %}
-'''
+"""
 ingress_text_template = template_env.from_string(ingress_text_str)
 
 
 async def refresh_ingress_text():
-    set_content('ingress_text', ingress_text())
+    set_content("ingress_text", ingress_text())
 
 
 def ingress_text():
     ctx = context()
-    urls = ctx.obj.get('urls')
+    urls = ctx.obj.get("urls")
     if not urls:
-        return ''
+        return ""
     rl = []
     results = []
 
     def tidy_report(re):
         if not re.request:
-            return ''
-        report = {'url': re.request.url}
+            return ""
+        report = {"url": re.request.url}
         if isinstance(re, requests.Response):
             report.update(
                 {
-                    'status': re.status_code,
-                    'text': re.text,
+                    "status": re.status_code,
+                    "text": re.text,
                 }
             )
         elif isinstance(re, requests.exceptions.RequestException):
             report.update(
                 {
-                    'status': re.__class__.__name__,
-                    'text': str(re),
+                    "status": re.__class__.__name__,
+                    "text": str(re),
                 }
             )
         else:
-            raise ValueError(f'cannot process this request result: {re}')
+            raise ValueError(f"cannot process this request result: {re}")
         return report
 
     # why use ThreadPoolExecutor?
@@ -267,13 +267,13 @@ def ingress_text():
         for future in as_completed(rl):
             results.append(tidy_report(future.result()))
 
-    render_ctx = {'results': sorted(results, key=itemgetter('url'))}
+    render_ctx = {"results": sorted(results, key=itemgetter("url"))}
     res = ingress_text_template.render(**render_ctx)
     return res
 
 
 Win = partial(Window, wrap_lines=True)
-Title = partial(FormattedTextControl, style='fg:GreenYellow')
+Title = partial(FormattedTextControl, style="fg:GreenYellow")
 
 
 async def refresh_content():
@@ -292,9 +292,9 @@ def build_app_status():
     ctx = context()
     build_app_status_command()
     # building pods container
-    pod_text_control = FormattedTextControl(text=lambda: CONTENT_VENDERER['pod_text'])
+    pod_text_control = FormattedTextControl(text=lambda: CONTENT_VENDERER["pod_text"])
     pod_win = Win(content=pod_text_control)
-    pod_title = ctx.obj['watch_pod_title']
+    pod_title = ctx.obj["watch_pod_title"]
     pod_container = HSplit(
         [
             Win(
@@ -305,9 +305,9 @@ def build_app_status():
         ]
     )
     # building top container
-    top_text_control = FormattedTextControl(text=lambda: CONTENT_VENDERER['top_text'])
+    top_text_control = FormattedTextControl(text=lambda: CONTENT_VENDERER["top_text"])
     top_win = Win(content=top_text_control)
-    top_title = ctx.obj['watch_top_title']
+    top_title = ctx.obj["watch_top_title"]
     top_container = HSplit(
         [
             Win(
@@ -319,29 +319,29 @@ def build_app_status():
     )
     # building podinfo container
     podinfo_text_control = FormattedTextControl(
-        text=lambda: CONTENT_VENDERER['podinfo_text']
+        text=lambda: CONTENT_VENDERER["podinfo_text"]
     )
     podinfo_window = Win(content=podinfo_text_control)
     podinfo_container = HSplit(
         [
             Win(
                 height=1,
-                content=Title('events or logs for pod in weird states'),
+                content=Title("events or logs for pod in weird states"),
             ),
             podinfo_window,
         ]
     )
     parts = [pod_container, top_container, podinfo_container]
     # building ingress container
-    urls = ctx.obj.get('urls')
+    urls = ctx.obj.get("urls")
     if urls:
         ingress_text_control = FormattedTextControl(
-            text=lambda: CONTENT_VENDERER['ingress_text']
+            text=lambda: CONTENT_VENDERER["ingress_text"]
         )
         ingress_window = Win(content=ingress_text_control, height=len(urls) + 3)
         ingress_container = HSplit(
             [
-                Win(height=1, content=Title('url requests')),
+                Win(height=1, content=Title("url requests")),
                 ingress_window,
             ]
         )
@@ -351,8 +351,8 @@ def build_app_status():
     root_container = HSplit(parts)
     kb = KeyBindings()
 
-    @kb.add('c-c', eager=True)
-    @kb.add('c-q', eager=True)
+    @kb.add("c-c", eager=True)
+    @kb.add("c-q", eager=True)
     def _(event):
         event.app.exit()
 
@@ -372,51 +372,51 @@ def display_app_status():
 
 def build_cluster_status_command():
     ctx = context()
-    pod_cmd = ctx.obj['watch_bad_pod_command'] = [
-        'get',
-        'po',
-        '--all-namespaces',
-        '-owide',
+    pod_cmd = ctx.obj["watch_bad_pod_command"] = [
+        "get",
+        "po",
+        "--all-namespaces",
+        "-owide",
     ]
-    ctx.obj['watch_bad_pod_title'] = f'k {list2cmdline(pod_cmd)}'
+    ctx.obj["watch_bad_pod_title"] = f"k {list2cmdline(pod_cmd)}"
 
 
 async def refresh_bad_pod_text():
     res, pods = get_pods(headers=True, show_only_bad_pods=True)
-    set_content('pod_text', '\n'.join(pods) or ensure_str(res.stderr))
+    set_content("pod_text", "\n".join(pods) or ensure_str(res.stderr))
 
 
 def bad_node_text():
     ctx = context()
-    cmd = ctx.obj['watch_node_command'] = ['get', 'node', '--no-headers']
+    cmd = ctx.obj["watch_node_command"] = ["get", "node", "--no-headers"]
     res = kubectl(*cmd, timeout=2, capture_output=True, check=False)
     if rc(res):
         return ensure_str(res.stderr)
     all_nodes = ensure_str(res.stdout)
-    bad_nodes = [line for line in all_nodes.splitlines() if ' Ready ' not in line]
-    return '\n'.join(bad_nodes)
+    bad_nodes = [line for line in all_nodes.splitlines() if " Ready " not in line]
+    return "\n".join(bad_nodes)
 
 
 async def refresh_bad_node_text():
-    set_content('node_text', bad_node_text())
+    set_content("node_text", bad_node_text())
 
 
 async def refresh_global_ingress_text():
-    set_content('ingress_text', global_ingress_text())
+    set_content("ingress_text", global_ingress_text())
 
 
 def global_ingress_text():
     ctx = context()
-    global_urls = ctx.obj['global_urls']
+    global_urls = ctx.obj["global_urls"]
     if not global_urls:
-        return ''
+        return ""
     rl = []
     results = []
 
     def tidy_report(re):
         if not re.request:
-            return ''
-        report = {'url': re.request.url}
+            return ""
+        report = {"url": re.request.url}
         if isinstance(re, requests.Response):
             code = re.status_code
             if code >= 502 or (
@@ -424,34 +424,34 @@ def global_ingress_text():
             ):
                 report.update(
                     {
-                        'status': re.status_code,
-                        'text': re.text,
+                        "status": re.status_code,
+                        "text": re.text,
                     }
                 )
         elif isinstance(re, requests.exceptions.RequestException):
             report.update(
                 {
-                    'status': re.__class__.__name__,
-                    'text': str(re),
+                    "status": re.__class__.__name__,
+                    "text": str(re),
                 }
             )
         else:
-            raise ValueError(f'cannot process this request result: {re}')
+            raise ValueError(f"cannot process this request result: {re}")
         return report
 
-    simple = ctx.obj.get('simple')
+    simple = ctx.obj.get("simple")
     with ThreadPoolExecutor(max_workers=len(global_urls)) as executor:
         for url in global_urls:
             rl.append(executor.submit(test_url, url))
 
         for future in as_completed(rl):
             single_report = tidy_report(future.result())
-            if not single_report or not single_report.get('status'):
+            if not single_report or not single_report.get("status"):
                 continue
             if simple or len(results) < tell_screen_height(0.4):
                 results.append(single_report)
 
-    render_ctx = {'results': sorted(results, key=itemgetter('url'))}
+    render_ctx = {"results": sorted(results, key=itemgetter("url"))}
     res = ingress_text_template.render(**render_ctx)
     return res
 
@@ -474,10 +474,10 @@ def build_cluster_status():
     build_cluster_status_command()
     # building pods container
     bad_pod_text_control = FormattedTextControl(
-        text=lambda: CONTENT_VENDERER['pod_text']
+        text=lambda: CONTENT_VENDERER["pod_text"]
     )
     bad_pod_win = Win(content=bad_pod_text_control)
-    bad_pod_title = ctx.obj['watch_bad_pod_title']
+    bad_pod_title = ctx.obj["watch_bad_pod_title"]
     bad_pod_container = HSplit(
         [
             Win(
@@ -489,30 +489,30 @@ def build_cluster_status():
     )
     # building nodes container
     bad_node_text_control = FormattedTextControl(
-        text=lambda: CONTENT_VENDERER['node_text']
+        text=lambda: CONTENT_VENDERER["node_text"]
     )
     bad_node_window = Win(content=bad_node_text_control)
     bad_node_container = HSplit(
         [
             Win(
                 height=1,
-                content=Title('bad nodes'),
+                content=Title("bad nodes"),
             ),
             bad_node_window,
         ]
     )
     parts = [bad_pod_container, bad_node_container]
-    global_urls = ctx.obj.get('global_urls')
+    global_urls = ctx.obj.get("global_urls")
     if global_urls:
         ingress_text_control = FormattedTextControl(
-            text=lambda: CONTENT_VENDERER['ingress_text']
+            text=lambda: CONTENT_VENDERER["ingress_text"]
         )
         ingress_window = Win(
             content=ingress_text_control, height=lambda: tell_screen_height(0.4)
         )
         ingress_container = HSplit(
             [
-                Win(height=1, content=Title('bad url requests')),
+                Win(height=1, content=Title("bad url requests")),
                 ingress_window,
             ]
         )
@@ -522,8 +522,8 @@ def build_cluster_status():
     root_container = HSplit(parts)
     kb = KeyBindings()
 
-    @kb.add('c-c', eager=True)
-    @kb.add('c-q', eager=True)
+    @kb.add("c-c", eager=True)
+    @kb.add("c-q", eager=True)
     def _(event):
         event.app.exit()
 

@@ -31,7 +31,7 @@ RUN apt-get update && \
     curl -LO https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-64bit.deb && \
     dpkg -i trivy_${TRIVY_VERSION}_Linux-64bit.deb && \
     rm *.deb && \
-    echo "Install utility softwares" && \
+    echo "Install utility software" && \
     apt-get install -y \
     docker docker-compose mysql-client mytop libmysqlclient-dev redis-tools iputils-ping dnsutils \
     zip zsh fasd silversearcher-ag telnet rsync vim lsof tree openssh-client apache2-utils git git-lfs && \

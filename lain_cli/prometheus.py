@@ -23,15 +23,15 @@ class Prometheus(RequestClientMixin):
     def __init__(self, endpoint=None):
         if not endpoint:
             cc = tell_cluster_config()
-            endpoint = cc.get('prometheus')
+            endpoint = cc.get("prometheus")
             if not endpoint:
-                raise click.Abort(f'prometheus not provided in cluster config: {cc}')
+                raise click.Abort(f"prometheus not provided in cluster config: {cc}")
 
         ctx = context(silent=True)
         self.query_range = (
-            ctx.obj.get('values', {}).get('prometheus_query_range', '7d')
+            ctx.obj.get("values", {}).get("prometheus_query_range", "7d")
             if ctx
-            else '7d'
+            else "7d"
         )
         self.query_step = int(int(parse_timespan(self.query_range)) / 1440)
         self.endpoint = endpoint
@@ -44,14 +44,14 @@ class Prometheus(RequestClientMixin):
 
     def query_cpu(self, appname, proc_name, **kwargs):
         cc = tell_cluster_config()
-        query_template = cc.get('pql_template', {}).get('cpu')
+        query_template = cc.get("pql_template", {}).get("cpu")
         if not query_template:
-            raise ValueError('pql_template.cpu not configured in cluster config')
+            raise ValueError("pql_template.cpu not configured in cluster config")
         q = query_template.format(
             appname=appname, proc_name=proc_name, range=self.query_range
         )
-        kwargs.setdefault('step', self.query_step)
-        kwargs['end'] = datetime.now(timezone.utc)
+        kwargs.setdefault("step", self.query_step)
+        kwargs["end"] = datetime.now(timezone.utc)
         res = self.query(q, **kwargs)
         return res
 
@@ -60,7 +60,7 @@ class Prometheus(RequestClientMixin):
         cpu_result = self.query_cpu(appname, proc_name)
         # [{'metric': {}, 'value': [1595486084.053, '4.990567343235413']}]
         if cpu_result:
-            cpu_top_list = [ceil(float(p[-1])) for p in cpu_result[0]['values']]
+            cpu_top_list = [ceil(float(p[-1])) for p in cpu_result[0]["values"]]
             cnt = len(cpu_top_list)
             if cpu_top_list.count(0) / cnt > 0.7:
                 accurate = False
@@ -76,27 +76,27 @@ class Prometheus(RequestClientMixin):
 
     def memory_quantile(self, appname, proc_name, **kwargs):
         cc = tell_cluster_config()
-        query_template = cc.get('pql_template', {}).get('memory_quantile')
+        query_template = cc.get("pql_template", {}).get("memory_quantile")
         if not query_template:
             raise ValueError(
-                'pql_template.memory_quantile not configured in cluster config'
+                "pql_template.memory_quantile not configured in cluster config"
             )
         q = query_template.format(
             appname=appname, proc_name=proc_name, range=self.query_range
         )
-        kwargs.setdefault('step', self.query_step)
+        kwargs.setdefault("step", self.query_step)
         res = self.query(q, **kwargs)
         if not res:
             return
         # [{'metric': {}, 'value': [1583388354.31, '744079360']}]
-        memory_quantile = int(float(res[0]['value'][-1]))
+        memory_quantile = int(float(res[0]["value"][-1]))
         return memory_quantile
 
     def query(self, query, start=None, end=None, step=None, timeout=20):
         # https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries
         data = {
-            'query': query,
-            'timeout': timeout,
+            "query": query,
+            "timeout": timeout,
         }
         if start or end:
             if not start:
@@ -108,33 +108,33 @@ class Prometheus(RequestClientMixin):
             if not step:
                 step = 60
 
-            path = '/api/v1/query_range'
+            path = "/api/v1/query_range"
             data.update(
                 {
-                    'start': self.format_time(start),
-                    'end': self.format_time(end),
-                    'step': step,
+                    "start": self.format_time(start),
+                    "end": self.format_time(end),
+                    "step": step,
                 }
             )
         else:
-            path = '/api/v1/query'
+            path = "/api/v1/query"
 
         try:
             res = self.post(path, data=data)
         except ReadTimeout:
-            warn('prometheus query timeout, consider using grafana instead')
+            warn("prometheus query timeout, consider using grafana instead")
             return []
         try:
             responson = res.json()
         except json.decoder.JSONDecodeError as e:
-            raise ValueError(f'cannot decode: {ensure_str(res.text)}') from e
-        if responson.get('status') == 'error':
-            err_msg = responson['error']
-            if 'query timed out' in err_msg:
-                warn('prometheus query timeout, consider using grafana instead')
+            raise ValueError(f"cannot decode: {ensure_str(res.text)}") from e
+        if responson.get("status") == "error":
+            err_msg = responson["error"]
+            if "query timed out" in err_msg:
+                warn("prometheus query timeout, consider using grafana instead")
                 return []
             raise ValueError(err_msg)
-        return responson['data']['result']
+        return responson["data"]["result"]
 
 
 class Alertmanager(RequestClientMixin):
@@ -145,21 +145,21 @@ class Alertmanager(RequestClientMixin):
     def __init__(self, endpoint=None):
         if not endpoint:
             cc = tell_cluster_config()
-            endpoint = cc.get('alertmanager')
+            endpoint = cc.get("alertmanager")
             if not endpoint:
-                raise click.Abort(f'alertmanager not provided in cluster config: {cc}')
+                raise click.Abort(f"alertmanager not provided in cluster config: {cc}")
 
-        self.endpoint = endpoint.rstrip('/')
+        self.endpoint = endpoint.rstrip("/")
 
     def post_alerts(self, labels=None):
-        label_dic = dict(labels or ('label', 'value'))
+        label_dic = dict(labels or ("label", "value"))
         payload = [
             {
-                'labels': label_dic,
-                'annotations': label_dic,
-                'generatorURL': f'{self.endpoint}/<generating_expression>',
+                "labels": label_dic,
+                "annotations": label_dic,
+                "generatorURL": f"{self.endpoint}/<generating_expression>",
             },
         ]
-        res = self.post('/api/v2/alerts', json=payload)
+        res = self.post("/api/v2/alerts", json=payload)
         if res.status_code >= 400:
             error(res.text)

@@ -5,53 +5,36 @@ repos:
       - id: check-useless-excludes
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v5.0.0
     hooks:
       - id: check-yaml
         exclude: lain_cli/chart_template
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
-  - repo: https://github.com/psf/black
-    rev: 23.7.0
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.0
     hooks:
-      - id: black
-        args: ["--skip-string-normalization"]
+      - id: ruff-check
+        args:
+          - --fix
+      - id: ruff-format
 
   - repo: https://github.com/jendrikseipp/vulture
-    rev: v2.7
+    rev: v2.14
     hooks:
       - id: vulture
-        types: [python]
+        types:
+          - python
         args:
           - lain_cli
-
-  - repo: https://github.com/PyCQA/flake8
-    rev: 6.1.0
-    hooks:
-      - id: flake8
-        additional_dependencies:
-          - flake8-pytest-style
-          - flake8-bugbear
-          - flake8-logging-format
-
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.5
-    hooks:
-      - id: bandit
-        args: ["-ll", "-c", ".bandit.yml"]
 
   - repo: https://github.com/jorisroovers/gitlint
     rev: v0.19.1
     hooks:
       - id: gitlint
 
-  - repo: https://github.com/PyCQA/pylint
-    rev: v3.0.0a6
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.32.0
     hooks:
-      - id: pylint
-        name: pylint
-        types: [python]
-        entry: python -m pylint.__main__
-        language: system
-        args: ["-rn", "-sn", "--rcfile=pylintrc"]
+      - id: typos
