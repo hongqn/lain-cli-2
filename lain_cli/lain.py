@@ -1047,7 +1047,7 @@ def job(
             ]
     else:
         # 如果发现是在 lain app 目录内运行 lain job, 就选取一个 deploy,
-        # 拿出各种 spec 里的信息, 来渲染 job.yaml
+        # 拿出各种 spec 里的信息，来渲染 job.yaml
         deploy = tell_best_deploy()
         res = kubectl(
             "get", "deploy", f"{appname}-{deploy}", "-ojson", capture_output=True
@@ -2414,7 +2414,7 @@ def version(ctx, images_count):
             tags_list = registry.list_tags(appname, timeout=2, n=images_count) or []
             click.echo(click.style("recent image tags", fg="bright_yellow"), err=True)
             for tag in tags_list:
-                # 多打印一个空格, 这样复制粘贴的命令不会进入 bash history
+                # 多打印一个空格，这样复制粘贴的命令不会进入 bash history
                 echo(f" lain deploy --set imageTag={tag}", clean=False)
 
 
