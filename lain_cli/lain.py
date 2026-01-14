@@ -1116,7 +1116,7 @@ def job(
             ctx.exit(pod_rc)
         else:
             echo("created a container to sleep 1h, you must finish your work within")
-            kubectl("exec", "-it", pod_name, sh, timeout=None)
+            kubectl("exec", "-it", pod_name, "--", sh, timeout=None)
             kubectl("delete", "job", job_name)
 
 
