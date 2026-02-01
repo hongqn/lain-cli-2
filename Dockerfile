@@ -3,6 +3,7 @@ FROM ${BASE}
 
 ENV DEBIAN_FRONTEND=noninteractive LAIN_IGNORE_LINT="true" PS1="lain# "
 
+ARG DOCKER_VERSION=27.5.1
 ARG HELM_VERSION=3.12.2
 ARG TRIVY_VERSION=0.23.0
 ARG KUBECTL_VERSION=1.27.4
@@ -31,9 +32,13 @@ RUN apt-get update && \
     curl -LO https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-64bit.deb && \
     dpkg -i trivy_${TRIVY_VERSION}_Linux-64bit.deb && \
     rm *.deb && \
+    echo "Install Docker CLI" && \
+    curl -LO https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz && \
+    tar -xzf docker-${DOCKER_VERSION}.tgz --strip-components=1 -C /usr/local/bin docker/docker && \
+    rm docker-${DOCKER_VERSION}.tgz && \
     echo "Install utility software" && \
     apt-get install -y \
-    docker docker-compose mysql-client mytop libmysqlclient-dev redis-tools iputils-ping dnsutils \
+    docker-compose mysql-client mytop libmysqlclient-dev redis-tools iputils-ping dnsutils \
     zip zsh fasd silversearcher-ag telnet rsync vim lsof tree openssh-client apache2-utils git git-lfs && \
     chsh -s /usr/bin/zsh root && \
     echo "Clean up" && \
