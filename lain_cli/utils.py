@@ -1605,10 +1605,19 @@ def asdf_global(bin, v):
     code = rc(res)
     if code:
         stderr = ensure_str(res.stderr)
-        if "is not installed" in stderr:
+        if "invalid command" in stderr and "global" in stderr:
+            asdf("install", bin, v)
+            cmd = ["set", "-u", bin, v]
+            res = asdf(*cmd, check=False, capture_error=True)
+            code = rc(res)
+            if code:
+                stderr = ensure_str(res.stderr)
+                error(f"weird asdf error: {stderr}", exit=code)
+        elif "is not installed" in stderr or "No version installed" in stderr:
             asdf("install", bin, v)
             return asdf_global(bin, v)
-        error(f"weird asdf error: {stderr}", exit=code)
+        else:
+            error(f"weird asdf error: {stderr}", exit=code)
 
     if not kubectl_version_challenge(autofix=False):
         cmd_str = " ".join(cmd)
@@ -2853,9 +2862,13 @@ def version_challenge():
     if not cc:
         return
     pypi_index = cc["pypi_index"]
-    search_scope = SearchScope.create(
-        find_links=[], index_urls=[pypi_index], no_index=False
-    )
+    try:
+        search_scope = SearchScope.create(
+            find_links=[], index_urls=[pypi_index], no_index=False
+        )
+    except TypeError:
+        # Older pip versions don't accept the no_index kwarg.
+        search_scope = SearchScope.create(find_links=[], index_urls=[pypi_index])
     link_collector = LinkCollector(session=session, search_scope=search_scope)
     selection_prefs = SelectionPreferences(
         allow_yanked=False,

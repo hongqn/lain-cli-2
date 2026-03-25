@@ -24,6 +24,7 @@ from lain_cli.utils import (
     make_job_name,
     subprocess_run,
     tell_all_clusters,
+    tell_best_deploy,
     tell_cluster,
     tell_cluster_config,
     tell_git_ignore,
@@ -351,3 +352,27 @@ def test_make_image_str():
         make_image_str, kwargs={"registry": "private.com", "image_tag": image_tag}
     )
     assert image == f"private.com/{DUMMY_APPNAME}:1.0"
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_job_deploy_selection():
+    """test that lain job defaults to the first defined deployment,
+    and tell_best_deploy picks the one with most memory"""
+
+    def setup_multi_deploy_and_check():
+        obj = context().obj
+        values = obj["values"]
+        # add a jupyter deployment with more memory than web
+        values["deployments"]["jupyter"] = {
+            "command": ["jupyter"],
+            "resources": {"limits": {"memory": "16Gi", "cpu": "1000m"}},
+        }
+        # default deploy selection: first key
+        deploys = values["deployments"]
+        first_deploy = list(deploys.keys())[0]
+        assert first_deploy == "web"
+        # tell_best_deploy: picks highest memory
+        best = tell_best_deploy()
+        assert best == "jupyter"
+
+    run_under_click_context(setup_multi_deploy_and_check)

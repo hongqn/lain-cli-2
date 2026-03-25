@@ -344,7 +344,7 @@ def list_singletons(ctx):
             echo(f"{deploy_name} from {release_name}, user: {user}")
 
 
-@admin.command()
+@admin.command(name="status")
 @click.option(
     "--simple",
     "-s",
@@ -352,7 +352,7 @@ def list_singletons(ctx):
     help="print static status, rather than display in prompt app",
 )
 @click.pass_context
-def status(ctx, simple):
+def admin_status(ctx, simple):
     ctx.obj["silent"] = True
     ctx.obj["simple"] = simple
     ing_list = ensure_str(
@@ -388,10 +388,10 @@ def status(ctx, simple):
     display_cluster_status()
 
 
-@admin.command()
+@admin.command(name="x")
 @click.argument("command", nargs=-1)
 @click.pass_context
-def x(ctx, command):
+def admin_x(ctx, command):
     """run command on all containers (one for each deployment) within current
     namespace.  only show output when command succeeds
 
@@ -964,6 +964,11 @@ def logs(ctx, proc, tail, use_stern, use_kibana):
     help="start a container that sleeps for --timeout, and run your command in a interactive session",
 )
 @click.option("--context", is_flag=True, help="copy all files under $CWD to container")
+@click.option(
+    "--deploy",
+    default=None,
+    help="specify which deployment to use as job template, default to the first defined deployment",
+)
 @click.argument("command", nargs=-1)
 @click.pass_context
 def job(
@@ -977,6 +982,7 @@ def job(
     force,
     interactive,
     context,
+    deploy,
     command,
 ):
     """creates a Kubernetes Job to run desired command.
@@ -1048,7 +1054,9 @@ def job(
     else:
         # 如果发现是在 lain app 目录内运行 lain job, 就选取一个 deploy,
         # 拿出各种 spec 里的信息，来渲染 job.yaml
-        deploy = tell_best_deploy()
+        if not deploy:
+            deploys = ctx.obj["values"]["deployments"]
+            deploy = list(deploys.keys())[0]
         res = kubectl(
             "get", "deploy", f"{appname}-{deploy}", "-ojson", capture_output=True
         )
@@ -2201,10 +2209,10 @@ def addfile(ctx, f, overwrite):
         lain_("restart", "--graceful")
 
 
-@env.command()
+@env.command(name="add")
 @click.argument("pairs", type=KVPairType(), nargs=-1)
 @click.pass_context
-def add(ctx, pairs):
+def env_add(ctx, pairs):
     """add environment variable.
 
     \b
@@ -2231,18 +2239,18 @@ def add(ctx, pairs):
         lain_("restart", "--graceful")
 
 
-@env.command()
+@env.command(name="show")
 @click.pass_context
-def show(ctx):
+def env_show(ctx):
     """print environment variables"""
     ctx.obj["silent"] = True
     secret_dic = tell_secret(ctx.obj["env_name"], init="env")
     echo(yadu(secret_dic))
 
 
-@env.command()
+@env.command(name="edit")
 @click.pass_context
-def edit(ctx):
+def env_edit(ctx):
     """edit environment variables using $EDITOR"""
     f = dump_secret(ctx.obj["env_name"], init="env")
     res = kubectl_edit(f, notify_diff=True, tee=True, backup=True)
