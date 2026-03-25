@@ -3,7 +3,8 @@ FROM ${BASE}
 
 ENV DEBIAN_FRONTEND=noninteractive LAIN_IGNORE_LINT="true" PS1="lain# "
 
-ARG DOCKER_VERSION=27.5.1
+ARG DOCKER_VERSION=29.3.0
+ARG BUILDX_VERSION=0.32.1
 ARG HELM_VERSION=3.12.2
 ARG TRIVY_VERSION=0.23.0
 ARG KUBECTL_VERSION=1.33.5
@@ -36,6 +37,11 @@ RUN apt-get update && \
     curl -LO https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz && \
     tar -xzf docker-${DOCKER_VERSION}.tgz --strip-components=1 -C /usr/local/bin docker/docker && \
     rm docker-${DOCKER_VERSION}.tgz && \
+    echo "Install Docker Buildx plugin" && \
+    mkdir -p /usr/local/lib/docker/cli-plugins && \
+    curl -Lo /usr/local/lib/docker/cli-plugins/docker-buildx \
+        https://github.com/docker/buildx/releases/download/v${BUILDX_VERSION}/buildx-v${BUILDX_VERSION}.linux-amd64 && \
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx && \
     echo "Install utility software" && \
     apt-get install -y \
     docker-compose mysql-client mytop libmysqlclient-dev redis-tools iputils-ping dnsutils \
