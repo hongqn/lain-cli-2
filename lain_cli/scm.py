@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from random import choices
 from typing import Any
 
@@ -8,7 +6,7 @@ import gitlab
 from lain_cli.utils import error, must_get_env, tell_cluster_config, warn
 
 
-def tell_scm() -> GitLabSCM:
+def tell_scm() -> "GitLabSCM":
     cc = tell_cluster_config()
     endpoint = cc.get("gitlab")
     if not endpoint:

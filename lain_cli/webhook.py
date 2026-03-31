@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from inspect import cleandoc
 from typing import Any
 from urllib.parse import urlparse
@@ -20,7 +18,7 @@ from lain_cli.utils import (
 )
 
 
-def tell_webhook_client(hook_url: str | None = None) -> Webhook | None:
+def tell_webhook_client(hook_url: str | None = None) -> "Webhook | None":
     ctx = context()
     obj = ctx.obj
     config = obj.get("values", {}).get("webhook", {})

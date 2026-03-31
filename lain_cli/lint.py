@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 from lain_cli.utils import format_kubernetes_memory, parse_size

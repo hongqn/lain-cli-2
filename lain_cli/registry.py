@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from json.decoder import JSONDecodeError
 from typing import Any
 

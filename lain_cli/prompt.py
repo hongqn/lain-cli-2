@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
