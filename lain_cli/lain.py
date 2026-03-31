@@ -1116,7 +1116,11 @@ def job(
         kubectl("cp", src, f"{pod_name}:/tmp/{remote_dirname}", timeout=None)
 
     if interactive:
-        return kubectl("exec", "-it", pod_name, "--", *command, timeout=None)
+        try:
+            kubectl("exec", "-it", pod_name, "--", *command, timeout=None)
+        finally:
+            kubectl("delete", "job", job_name)
+        return
     if wait or isatty:
         if command:
             kubectl("logs", "-f", "-l", f"job-name={job_name}", timeout=None)
