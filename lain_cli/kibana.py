@@ -1,5 +1,10 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 from time import sleep
+from typing import Any
+
+import requests
 
 from humanfriendly import parse_timespan
 
@@ -10,7 +15,7 @@ class Kibana(RequestClientMixin):
     timezone = "Asia/Shanghai"
     timeout = 40
 
-    def __init__(self):
+    def __init__(self) -> None:
         cc = tell_cluster_config()
         kibana_host = cc.get("kibana")
         if not kibana_host:
@@ -22,18 +27,21 @@ class Kibana(RequestClientMixin):
             "kbn-xsrf": "true",
         }
 
-    def request(self, *args, **kwargs):
+    def request(self, *args: Any, **kwargs: Any) -> requests.Response:
         res = super().request(*args, **kwargs)
         res.raise_for_status()
         return res
 
     @staticmethod
-    def isoformat(dt):
+    def isoformat(dt: datetime) -> str:
         return f"{dt.isoformat()}Z"
 
     def count_records_for_host(
-        self, host=None, ingress_class="lain-internal", period="7d"
-    ):
+        self,
+        host: str | None = None,
+        ingress_class: str = "lain-internal",
+        period: str = "7d",
+    ) -> int:
         path = "/internal/search/es"
         start = datetime.utcnow()
         delta = timedelta(seconds=parse_timespan(period))

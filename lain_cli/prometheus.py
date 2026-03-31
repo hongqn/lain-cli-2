@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import json
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from statistics import StatisticsError, quantiles
+from typing import Any, Iterable
+
+import requests
 
 import click
 from humanfriendly import parse_timespan
@@ -16,11 +21,13 @@ from lain_cli.utils import (
     warn,
 )
 
+PrometheusResult = list[dict[str, Any]]
+
 
 class Prometheus(RequestClientMixin):
     timeout = 20
 
-    def __init__(self, endpoint=None):
+    def __init__(self, endpoint: str | None = None) -> None:
         if not endpoint:
             cc = tell_cluster_config()
             endpoint = cc.get("prometheus")
@@ -37,12 +44,14 @@ class Prometheus(RequestClientMixin):
         self.endpoint = endpoint
 
     @staticmethod
-    def format_time(dt):
+    def format_time(dt: str | datetime) -> str:
         if isinstance(dt, str):
             return dt
         return dt.isoformat()
 
-    def query_cpu(self, appname, proc_name, **kwargs):
+    def query_cpu(
+        self, appname: str, proc_name: str, **kwargs: Any
+    ) -> PrometheusResult:
         cc = tell_cluster_config()
         query_template = cc.get("pql_template", {}).get("cpu")
         if not query_template:
@@ -55,7 +64,7 @@ class Prometheus(RequestClientMixin):
         res = self.query(q, **kwargs)
         return res
 
-    def cpu_p95(self, appname, proc_name, **kwargs):
+    def cpu_p95(self, appname: str, proc_name: str, **kwargs: Any) -> tuple[int, bool]:
         accurate = True
         cpu_result = self.query_cpu(appname, proc_name)
         # [{'metric': {}, 'value': [1595486084.053, '4.990567343235413']}]
@@ -74,7 +83,9 @@ class Prometheus(RequestClientMixin):
 
         return max([cpu_top, 5]), accurate
 
-    def memory_quantile(self, appname, proc_name, **kwargs):
+    def memory_quantile(
+        self, appname: str, proc_name: str, **kwargs: Any
+    ) -> int | None:
         cc = tell_cluster_config()
         query_template = cc.get("pql_template", {}).get("memory_quantile")
         if not query_template:
@@ -92,18 +103,27 @@ class Prometheus(RequestClientMixin):
         memory_quantile = int(float(res[0]["value"][-1]))
         return memory_quantile
 
-    def query(self, query, start=None, end=None, step=None, timeout=20):
+    def query(
+        self,
+        query: str,
+        start: str | datetime | None = None,
+        end: str | datetime | None = None,
+        step: int | None = None,
+        timeout: int = 20,
+    ) -> PrometheusResult:
         # https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries
         data = {
             "query": query,
             "timeout": timeout,
         }
         if start or end:
-            if not start:
-                start = end - timedelta(days=1)
-
-            if not end:
-                end = datetime.now(timezone.utc).isoformat()
+            start_time = start
+            end_time = end or datetime.now(timezone.utc)
+            if not start_time:
+                if isinstance(end_time, str):
+                    start_time = datetime.fromisoformat(end_time) - timedelta(days=1)
+                else:
+                    start_time = end_time - timedelta(days=1)
 
             if not step:
                 step = 60
@@ -111,8 +131,8 @@ class Prometheus(RequestClientMixin):
             path = "/api/v1/query_range"
             data.update(
                 {
-                    "start": self.format_time(start),
-                    "end": self.format_time(end),
+                    "start": self.format_time(start_time),
+                    "end": self.format_time(end_time),
                     "step": step,
                 }
             )
@@ -142,7 +162,7 @@ class Alertmanager(RequestClientMixin):
 
     timeout = 20
 
-    def __init__(self, endpoint=None):
+    def __init__(self, endpoint: str | None = None) -> None:
         if not endpoint:
             cc = tell_cluster_config()
             endpoint = cc.get("alertmanager")
@@ -151,8 +171,10 @@ class Alertmanager(RequestClientMixin):
 
         self.endpoint = endpoint.rstrip("/")
 
-    def post_alerts(self, labels=None):
-        label_dic = dict(labels or ("label", "value"))
+    def post_alerts(
+        self, labels: Iterable[tuple[str, str]] | None = None
+    ) -> requests.Response | None:
+        label_dic = dict(labels or (("label", "value"),))
         payload = [
             {
                 "labels": label_dic,

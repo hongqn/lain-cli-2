@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import re
+from typing import Any
 
 from aliyunsdkcore.acs_exception.exceptions import ServerException
 from aliyunsdkcore.client import AcsClient
@@ -15,11 +18,11 @@ from lain_cli.utils import (
 class AliyunRegistry(RegistryUtils):
     def __init__(
         self,
-        access_key_id=None,
-        access_key_secret=None,
-        registry=None,
-        **kwargs,
-    ):
+        access_key_id: str | None = None,
+        access_key_secret: str | None = None,
+        registry: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         if not all([access_key_id, access_key_secret, registry]):
             cc = tell_cluster_config()
             access_key_id = cc.get("access_key_id")
@@ -31,13 +34,14 @@ class AliyunRegistry(RegistryUtils):
             if not registry:
                 registry = cc["registry"]
 
+        assert registry is not None
         _, region_id, _, _, repo_namespace = re.split(r"[\./]", registry)
         self.registry = f"registry.{region_id}.aliyuncs.com/{repo_namespace}"
         self.acs_client = AcsClient(access_key_id, access_key_secret, region_id)
         self.repo_namespace = repo_namespace
         self.endpoint = f"cr.{region_id}.aliyuncs.com"
 
-    def list_tags(self, repo_name, **kwargs):
+    def list_tags(self, repo_name: str, **kwargs: Any) -> list[str] | None:
         request = GetRepoTagsRequest.GetRepoTagsRequest()
         request.set_RepoNamespace(self.repo_namespace)
         request.set_RepoName(repo_name)
@@ -52,6 +56,7 @@ class AliyunRegistry(RegistryUtils):
                 warn(f"error during aliyun api query: {e}")
                 return None
             raise
+        assert response is not None
         tags_data = jalo(response)["data"]["tags"]
         tags = self.sort_and_filter((d["tag"] for d in tags_data), n=kwargs.get("n"))
         return tags

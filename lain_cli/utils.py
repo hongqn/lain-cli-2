@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import inspect
@@ -12,7 +14,7 @@ import shutil
 import subprocess
 import sys
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from contextlib import contextmanager, suppress
 from copy import deepcopy
 from functools import lru_cache, partial
@@ -27,6 +29,7 @@ from os import getppid, makedirs, readlink, remove, unlink
 from os.path import abspath, basename, dirname, exists, expanduser, isdir, isfile, join
 from tempfile import TemporaryDirectory, mkstemp
 from time import sleep, time
+from typing import Any, Literal, TypeVar, cast, overload
 
 import click
 import psutil
@@ -104,6 +107,8 @@ INGRESS_CANARY_ANNOTATIONS = {
     "nginx.ingress.kubernetes.io/canary-weight",
 }
 DEFAULT_BACKEND_RESPONSE = "default backend - 404"
+T = TypeVar("T")
+CompletedProcessBytes = subprocess.CompletedProcess[bytes]
 
 
 def parse_multi_timespan(s):
@@ -122,7 +127,7 @@ def click_parse_timespan(ctx, param, value):
     if not value:
         return
     if isinstance(value, Number):
-        return int(value)
+        return int(cast(Any, value))
     return int(parse_timespan(value))
 
 
@@ -181,7 +186,15 @@ def diff_dict(old, new):
     return diff
 
 
-def context(silent=False):
+@overload
+def context(silent: Literal[False] = False) -> click.Context: ...
+
+
+@overload
+def context(silent: Literal[True]) -> click.Context | None: ...
+
+
+def context(silent: bool = False) -> click.Context | None:
     return click.get_current_context(silent=silent)
 
 
@@ -201,14 +214,20 @@ def excall(s, silent=None):
     click.echo(click.style(s, fg="bright_yellow"), err=True)
 
 
-def ensure_str(s):
+def ensure_str(s: Any) -> str:
     try:
         return s.decode("utf-8")
     except Exception:
         return str(s)
 
 
-def echo(s, fg=None, exit=None, err=False, clean=True):
+def echo(
+    s: Any,
+    fg: str | None = None,
+    exit: bool | int | None = None,
+    err: bool = False,
+    clean: bool = True,
+) -> None:
     if s is None:
         return
     s = ensure_str(s)
@@ -225,21 +244,21 @@ def echo(s, fg=None, exit=None, err=False, clean=True):
             ctx.exit(exit)
 
 
-def goodjob(s, exit=None, **kwargs):
+def goodjob(s: Any, exit: bool | int | None = None, **kwargs: Any) -> None:
     if exit:
         exit = 0
 
     return echo(s, fg="green", exit=exit, err=True, **kwargs)
 
 
-def warn(s, exit=None, **kwargs):
+def warn(s: Any, exit: bool | int | None = None, **kwargs: Any) -> None:
     if exit:
         exit = 1
 
     return echo(s, fg="magenta", exit=exit, err=True, **kwargs)
 
 
-def debug(s, exit=None, **kwargs):
+def debug(s: Any, exit: bool | int | None = None, **kwargs: Any) -> None:
     ctx = context(silent=True)
     if ctx and not ctx.obj.get("verbose"):
         return
@@ -249,14 +268,14 @@ def debug(s, exit=None, **kwargs):
     return echo(s, fg="black", exit=exit, err=True, **kwargs)
 
 
-def error(s, exit=None, **kwargs):
+def error(s: Any, exit: bool | int | None = None, **kwargs: Any) -> None:
     if exit:
         exit = 1
 
     return echo(s, fg="red", exit=exit, err=True, **kwargs)
 
 
-def flatten_list(nested_list):
+def flatten_list(nested_list: Iterable[Iterable[T]]) -> list[T]:
     return list(itertools.chain.from_iterable(nested_list))
 
 
@@ -651,11 +670,18 @@ def template_update_toast():
 
 
 class RequestClientMixin:
-    endpoint = None
-    headers = {}
+    endpoint: str | None = None
+    headers: dict[str, str] = {}
     timeout = 5
 
-    def request(self, method, path=None, params=None, data=None, **kwargs):
+    def request(
+        self,
+        method: str,
+        path: str | None = None,
+        params: dict[str, Any] | None = None,
+        data: Any = None,
+        **kwargs: Any,
+    ) -> requests.Response:
         if not path:
             url = self.endpoint
         elif self.endpoint:
@@ -665,20 +691,25 @@ class RequestClientMixin:
 
         kwargs.setdefault("timeout", self.timeout)
         res = requests.request(
-            method, url, headers=self.headers, params=params, data=data, **kwargs
+            method,
+            cast(str, url),
+            headers=self.headers,
+            params=params,
+            data=data,
+            **kwargs,
         )
         return res
 
-    def post(self, path=None, **kwargs):
+    def post(self, path: str | None = None, **kwargs: Any) -> requests.Response:
         return self.request("POST", path, **kwargs)
 
-    def get(self, path=None, **kwargs):
+    def get(self, path: str | None = None, **kwargs: Any) -> requests.Response:
         return self.request("GET", path, **kwargs)
 
-    def delete(self, path=None, **kwargs):
+    def delete(self, path: str | None = None, **kwargs: Any) -> requests.Response:
         return self.request("DELETE", path, **kwargs)
 
-    def head(self, path=None, **kwargs):
+    def head(self, path: str | None = None, **kwargs: Any) -> requests.Response:
         return self.request("HEAD", path, **kwargs)
 
 
@@ -686,14 +717,14 @@ class RegistryUtils:
     registry = "registry.fake/dev"
 
     @staticmethod
-    def is_protected_repo(repo):
+    def is_protected_repo(repo: str) -> bool:
         for s in PROTECTED_REPO_KEYWORDS:
             if s in repo:
                 return True
         return False
 
     @staticmethod
-    def parse_image_ts(s):
+    def parse_image_ts(s: str) -> int:
         if s == "latest":
             return sys.maxsize
         res = TIMESTAMP_PATTERN.search(s)
@@ -701,37 +732,42 @@ class RegistryUtils:
         return ts
 
     @staticmethod
-    def sort_and_filter(tags, n=None):
+    def sort_and_filter(tags: Iterable[str], n: int | None = None) -> list[str]:
         n = n or RECENT_TAGS_COUNT
         cleaned = sorted((s for s in tags if not s.startswith("prepare")), reverse=True)
         if n:
             return cleaned[:n]
         return cleaned
 
-    def make_image(self, tag, repo=None):
+    def make_image(self, tag: str, repo: str | None = None) -> str:
         ctx = context()
         if not repo:
             repo = ctx.obj["appname"]
 
         return f"{self.registry}/{repo}:{tag}"
 
-    def list_repos(self):
+    def list_repos(self) -> list[str] | None:
         raise NotImplementedError
 
-    def list_tags(self, repo_name):
+    def list_tags(self, repo_name: str, **kwargs: Any) -> list[str] | None:
         raise NotImplementedError
 
-    def list_images(self):
-        repos = self.list_repos()
+    def delete_image(
+        self, repo: str, tag: str | None = None
+    ) -> requests.Response | None:
+        raise NotImplementedError
+
+    def list_images(self) -> list[str]:
+        repos = self.list_repos() or []
         images = []
         for repo in repos:
-            tags = set(self.list_tags(repo))
+            tags = set(self.list_tags(repo) or [])
             images.extend([self.make_image(tag, repo=repo) for tag in tags])
 
         return images
 
 
-def tell_registry_client(cc=None):
+def tell_registry_client(cc: dict[str, Any] | None = None) -> RegistryUtils | None:
     if not cc:
         cc = tell_cluster_config()
 
@@ -833,6 +869,9 @@ def init_kubernetes_secret(secret_name, init="env"):
 
 def kubectl_edit(f, capture_output=False, notify_diff=True, **kwargs):
     webhook = None
+    old: Any = None
+    new: Any = None
+    res: Any = None
     if notify_diff:
         from lain_cli.webhook import tell_webhook_client
 
@@ -953,7 +992,7 @@ def backup_kubernetes_resource(dic):
         unlink(backup_name)
 
 
-def tell_change_from_kubectl_output(stdout):
+def tell_change_from_kubectl_output(stdout: str) -> bool:
     if "configured" in stdout:
         return True
     return False
@@ -1121,13 +1160,16 @@ def tell_image_tag(image_tag=None):
     return image_tag
 
 
-def lain_(*args, exit=None, **kwargs):
+def lain_(
+    *args: str, exit: bool | int | None = None, **kwargs: Any
+) -> CompletedProcessBytes:
     ctx = context()
     extra_values_file = ctx.obj.get("extra_values_file")
+    cmd_args = list(args)
     if extra_values_file:
-        args = ["--values", extra_values_file.name, *args]
+        cmd_args = ["--values", extra_values_file.name, *cmd_args]
 
-    cmd = ["lain", *args]
+    cmd = ["lain", *cmd_args]
     kwargs.setdefault("check", True)
     kwargs.setdefault("env", ENV)
     if ctx.obj.get("ignore_lint"):
@@ -1213,9 +1255,47 @@ def ensure_resource_initiated(chart=False, secret=False):
     return True
 
 
+@overload
 def subprocess_run(
-    *args, silent=None, dry_run=False, tee=False, abort_on_fail=False, **kwargs
-):
+    *args: Any,
+    silent: bool | None = None,
+    dry_run: Literal[True],
+    tee: bool = False,
+    abort_on_fail: bool = False,
+    **kwargs: Any,
+) -> None: ...
+
+
+@overload
+def subprocess_run(
+    *args: Any,
+    silent: bool | None = None,
+    dry_run: Literal[False] = False,
+    tee: bool = False,
+    abort_on_fail: bool = False,
+    **kwargs: Any,
+) -> CompletedProcessBytes: ...
+
+
+@overload
+def subprocess_run(
+    *args: Any,
+    silent: bool | None = None,
+    dry_run: bool,
+    tee: bool = False,
+    abort_on_fail: bool = False,
+    **kwargs: Any,
+) -> CompletedProcessBytes | None: ...
+
+
+def subprocess_run(
+    *args: Any,
+    silent: bool | None = None,
+    dry_run: bool = False,
+    tee: bool = False,
+    abort_on_fail: bool = False,
+    **kwargs: Any,
+) -> CompletedProcessBytes | None:
     """Same in functionality, but better than subprocess.run
 
     Args:
@@ -1243,32 +1323,36 @@ def subprocess_run(
         ctx = context(silent=True)
         silent = ctx and ctx.obj.get("silent")
 
+    popenargs = args
     if kwargs.get("shell"):
         if not isinstance(args[0], str):
-            args = list(args)
-            args[0] = " ".join(args[0])
+            shell_args = list(args)
+            shell_args[0] = " ".join(cast(Any, shell_args[0]))
+            popenargs = tuple(shell_args)
 
-    excall(*args, silent=silent)
+    excall(*popenargs, silent=silent)
     if dry_run:
-        return
+        return None
     try:
-        res = subprocess.run(*args, **kwargs)
+        res = subprocess.run(*popenargs, **kwargs)
     except subprocess.TimeoutExpired:
         timeout = kwargs["timeout"]
         stderr = (
             f"this command reached its {timeout}s timeout:\n "
-            + subprocess.list2cmdline(args[0])
-        )
+            + subprocess.list2cmdline(cast(Any, popenargs[0]))
+        ).encode("utf-8")
         if not silent:
             error(stderr)
 
-        res = subprocess.CompletedProcess(args[0], 1, stdout=stderr, stderr=stderr)
+        res = subprocess.CompletedProcess(popenargs[0], 1, stdout=stderr, stderr=stderr)
 
     stdout = res.stdout
     stderr = res.stderr
     if tee:
-        stdout and echo(stdout)
-        stderr and error(stderr)
+        if stdout:
+            echo(stdout)
+        if stderr:
+            error(stderr)
 
     code = rc(res)
     if code:
@@ -1306,6 +1390,7 @@ def stern_version_challenge():
         return stern_version_challenge()
     except PermissionError:
         error("Bad binary: stern, remove before use", exit=1)
+        return
 
     if version.parse(version_str) < STERN_MIN_VERSION:
         warn(f"your stern too old: {version_str}")
@@ -1347,6 +1432,7 @@ def helm_version_challenge():
         return helm_version_challenge()
     except PermissionError:
         error("Bad binary: helm, remove before use", exit=1)
+        return
 
     if version.parse(version_str) < HELM_MIN_VERSION:
         warn(f"your helm too old: {version_str}")
@@ -1366,7 +1452,9 @@ def download_helm():
         error("see https://github.com/helm/helm", exit=True)
 
 
-def helm(*args, check=True, exit=False, **kwargs):
+def helm(
+    *args: str, check: bool = True, exit: bool | int = False, **kwargs: Any
+) -> CompletedProcessBytes:
     helm_version_challenge()
     cmd = ["helm", *args]
     completed = subprocess_run(cmd, env=ENV, check=check, **kwargs)
@@ -1460,16 +1548,19 @@ def docker_images():
         }
 
 
-def docker(*args, exit=None, check=True, **kwargs):
+def docker(
+    *args: str, exit: bool | int | None = None, check: bool = True, **kwargs: Any
+) -> CompletedProcessBytes:
     # to make tests easier, this function can run without context
     ctx = context(silent=True)
+    docker_args = list(args)
     if ctx and ctx.obj.get("remote_docker"):
         cc = tell_cluster_config()
         docker_host = cc.get("remote_docker")
         if docker_host:
-            args = ["-H", docker_host] + list(args)
+            docker_args = ["-H", docker_host, *docker_args]
 
-    cmd = ["docker", *args]
+    cmd = ["docker", *docker_args]
     completed = subprocess_run(cmd, check=check, **kwargs)
     if exit and ctx:
         ctx.exit(rc(completed))
@@ -1482,6 +1573,7 @@ def parse_image_tag(image):
         repo, tag = image.split(":", 1)
     except (ValueError, AttributeError):
         error(f"not a valid image tag: {image}", exit=1)
+        raise
 
     return repo, tag
 
@@ -1626,7 +1718,9 @@ def asdf_global(bin, v):
         error(f"you should probably delete {bad_bin}, let asdf manage for you", exit=1)
 
 
-def git(*args, exit=None, check=True, **kwargs):
+def git(
+    *args: str, exit: bool | int | None = None, check: bool = True, **kwargs: Any
+) -> CompletedProcessBytes:
     cmd = ["git", *args]
     completed = subprocess_run(cmd, env=ENV, check=check, **kwargs)
     if exit:
@@ -1635,7 +1729,7 @@ def git(*args, exit=None, check=True, **kwargs):
     return completed
 
 
-def git_remote(**kwargs):
+def git_remote(**kwargs: Any) -> str:
     cmd = ["git", "remote", "-v"]
     completed = subprocess_run(cmd, env=ENV, capture_output=True, check=True, **kwargs)
     output = ensure_str(completed.stdout)
@@ -1729,6 +1823,7 @@ def kubectl_version_challenge(check=True, autofix=True):
         return kubectl_version_challenge()
     except PermissionError:
         error("Bad binary: kubectl, please reinstall", exit=1)
+        return
 
     if cv.major != sv.major or abs(sv.minor - cv.minor) >= 2:
         if autofix:
@@ -1739,7 +1834,43 @@ def kubectl_version_challenge(check=True, autofix=True):
     return True
 
 
-def kubectl(*args, exit=None, check=True, dry_run=False, **kwargs):
+@overload
+def kubectl(
+    *args: str,
+    exit: bool | int | None = None,
+    check: bool = True,
+    dry_run: Literal[True],
+    **kwargs: Any,
+) -> None: ...
+
+
+@overload
+def kubectl(
+    *args: str,
+    exit: bool | int | None = None,
+    check: bool = True,
+    dry_run: Literal[False] = False,
+    **kwargs: Any,
+) -> CompletedProcessBytes: ...
+
+
+@overload
+def kubectl(
+    *args: str,
+    exit: bool | int | None = None,
+    check: bool = True,
+    dry_run: bool,
+    **kwargs: Any,
+) -> CompletedProcessBytes | None: ...
+
+
+def kubectl(
+    *args: str,
+    exit: bool | int | None = None,
+    check: bool = True,
+    dry_run: bool = False,
+    **kwargs: Any,
+) -> CompletedProcessBytes | None:
     kubectl_version_challenge(check=check)
     cmd = ["kubectl", *args]
     kwargs.setdefault("timeout", 20)
@@ -1813,12 +1944,13 @@ def wait_for_svc_up(tries=20):
     return False
 
 
-def get_youngest_pod_ages(selector=None):
+def get_youngest_pod_ages(selector: str | None = None):
+    selector_arg = cast(str, selector)
     res = kubectl(
         "get",
         "po",
         "-l",
-        selector,
+        selector_arg,
         "--no-headers=true",
         capture_output=True,
     )
@@ -1841,6 +1973,7 @@ def wait_for_pod_up(selector=None, tries=40):
     waiting_state = frozenset(
         ("pending", "containercreating", "notready", "terminating")
     )
+    pod_name = ""
     while tries:
         tries -= 1
         sleep(3)
@@ -1877,8 +2010,9 @@ def wait_for_pod_up(selector=None, tries=40):
         debug(stdout)
         continue
     error("job container never got up, here's what's wrong:")
-    kubectl("describe", "po", pod_name, check=False)
-    kubectl("logs", pod_name, check=False)
+    if pod_name:
+        kubectl("describe", "po", pod_name, check=False)
+        kubectl("logs", pod_name, check=False)
 
 
 def wait_for_cluster_up(tries=1):
@@ -1951,6 +2085,7 @@ def ensure_absent(path, preserve=None):
     if isinstance(preserve, str):
         preserve = [preserve]
 
+    d = None
     if preserve:
         d = TemporaryDirectory()
         for p in preserve:
@@ -1971,7 +2106,7 @@ def ensure_absent(path, preserve=None):
         except FileNotFoundError:
             pass
 
-    if preserve:
+    if preserve and d is not None:
         for p in preserve:
             temp_path = join(d.name, p)
             if not exists(temp_path):
@@ -2035,11 +2170,11 @@ def yadu(dic, f=None):
         raise ValueError(f"f must be a file or path, got {f}")
 
 
-def jadu(dic):
+def jadu(dic: Any) -> str:
     return json.dumps(dic, separators=(",", ":"))
 
 
-def jalo(s):
+def jalo(s: str | bytes | bytearray) -> Any:
     """stupid json doesn't even tell you why anything fails"""
     try:
         return json.loads(s)
@@ -2095,7 +2230,7 @@ ReservedWord = NoneOf(RESERVED_WORDS, error="this is a reserved word, please cha
 
 
 class LenientSchema(Schema, metaclass=ReserveWord):
-    class Meta:
+    class Meta(Schema.Meta):
         unknown = INCLUDE
 
 
@@ -2437,7 +2572,9 @@ def update_extra_values(values, cluster=None, ignore_extra=False):
             ctx.obj["extra_values"] = extra_values
 
 
-def load_helm_values(values_yaml=f"./{CHART_DIR_NAME}/values.yaml"):
+def load_helm_values(
+    values_yaml: Any = f"./{CHART_DIR_NAME}/values.yaml",
+) -> dict[str, Any]:
     if hasattr(values_yaml, "read"):
         values = yalo(values_yaml)
     else:
@@ -2447,10 +2584,11 @@ def load_helm_values(values_yaml=f"./{CHART_DIR_NAME}/values.yaml"):
     update_extra_values(values)
     schema = HelmValuesSchema()
     try:
-        loaded = schema.load(values)
+        loaded = cast(dict[str, Any], schema.load(values))
     except ValidationError as e:
         error("your values.yaml did not pass schema check:")
         error(e, exit=1)
+        raise
 
     return loaded
 
@@ -2624,7 +2762,7 @@ def parse_kubernetes_cpu(s):
     1000
     """
     if isinstance(s, Number):
-        return int(s * 1000)
+        return int(cast(Any, s) * 1000)
     if isinstance(s, str) and s.endswith("m"):
         return int(s.replace("m", ""))
     if isinstance(s, str) and s.isdigit():
@@ -2825,7 +2963,7 @@ def tell_domain_tls_name(d):
     return "-".join(parts)
 
 
-def rc(res):
+def rc(res: Any) -> int:
     try:
         return res.exit_code
     except AttributeError:
@@ -2862,13 +3000,14 @@ def version_challenge():
     if not cc:
         return
     pypi_index = cc["pypi_index"]
+    create_search_scope = cast(Any, SearchScope.create)
     try:
-        search_scope = SearchScope.create(
+        search_scope = create_search_scope(
             find_links=[], index_urls=[pypi_index], no_index=False
         )
     except TypeError:
         # Older pip versions don't accept the no_index kwarg.
-        search_scope = SearchScope.create(find_links=[], index_urls=[pypi_index])
+        search_scope = create_search_scope(find_links=[], index_urls=[pypi_index])
     link_collector = LinkCollector(session=session, search_scope=search_scope)
     selection_prefs = SelectionPreferences(
         allow_yanked=False,
@@ -2978,7 +3117,9 @@ def tell_cluster_values_file(cluster=None, internal=False):
         return values_file
 
 
-def tell_cluster_config(cluster=None, is_current=None):
+def tell_cluster_config(
+    cluster: str | None = None, is_current: bool | None = None
+) -> dict[str, Any]:
     ctx = context(silent=True)
     if not cluster:
         if ctx:
@@ -3004,16 +3145,17 @@ def tell_cluster_config(cluster=None, is_current=None):
     update_extra_values(data, cluster=cluster, ignore_extra=True)
     schema = ClusterConfigSchema(context={"is_current": is_current})
     try:
-        cc = schema.load(data)
+        cc = cast(dict[str, Any], schema.load(data))
     except ValidationError as e:
         error("your cluster config did not pass schema check:")
         error(e, exit=1)
+        raise
 
     if is_current:
         if ctx:
             ctx.obj["cluster_config"] = cc
 
-        host_aliases = cc.get("hostAliases", []) or []
+        host_aliases = cast(list[dict[str, Any]], cc.get("hostAliases", []) or [])
         if host_aliases:
             hosts_dic = get_hosts_dict()
             for h in host_aliases:
