@@ -1116,7 +1116,24 @@ def job(
         kubectl("cp", src, f"{pod_name}:/tmp/{remote_dirname}", timeout=None)
 
     if interactive:
-        return kubectl("exec", "-it", pod_name, "--", *command, timeout=None)
+        reattach_hint = (
+            f"job {job_name} is still running, you can re-attach with:\n"
+            f" k exec -it {pod_name} -- {' '.join(command)}"
+        )
+        try:
+            res = kubectl(
+                "exec", "-it", pod_name, "--", *command, check=False, timeout=None
+            )
+        except KeyboardInterrupt:
+            echo(reattach_hint)
+            ctx.exit(130)
+        exit_code = rc(res)
+        if exit_code == 0:
+            try_to_cleanup_job(job_name)
+        else:
+            echo(reattach_hint)
+            ctx.exit(exit_code)
+        return
     if wait or isatty:
         if command:
             kubectl("logs", "-f", "-l", f"job-name={job_name}", timeout=None)

@@ -376,3 +376,77 @@ def test_job_deploy_selection():
         assert best == "jupyter"
 
     run_under_click_context(setup_multi_deploy_and_check)
+
+
+def _setup_interactive_job_mocks(mocker, exec_side_effect=None, exec_returncode=0):
+    """common mock setup for interactive job tests."""
+    import subprocess
+
+    mock_kubectl = mocker.patch("lain_cli.lain.kubectl")
+    mock_cleanup = mocker.patch("lain_cli.lain.try_to_cleanup_job")
+    mocker.patch("lain_cli.lain.kubectl_apply")
+    mocker.patch("lain_cli.lain.wait_for_pod_up", return_value=["test-pod"])
+    mocker.patch("lain_cli.lain.lain_meta", return_value="abc123")
+
+    if exec_side_effect:
+
+        def kubectl_side_effect(*args, **kwargs):
+            if args[:2] == ("exec", "-it"):
+                raise exec_side_effect
+
+        mock_kubectl.side_effect = kubectl_side_effect
+    else:
+
+        def kubectl_return(*args, **kwargs):
+            if args[:2] == ("exec", "-it"):
+                return subprocess.CompletedProcess(args, exec_returncode)
+
+        mock_kubectl.side_effect = kubectl_return
+    return mock_kubectl, mock_cleanup
+
+
+def test_interactive_job_cleanup_on_normal_exit(mocker):
+    """lain job -i, exit 0 must clean up the job."""
+    _, mock_cleanup = _setup_interactive_job_mocks(mocker, exec_returncode=0)
+
+    from click.testing import CliRunner
+
+    from lain_cli.lain import lain
+
+    runner = CliRunner(mix_stderr=False)
+    runner.invoke(lain, ["job", "-i", "--force", "bash"], catch_exceptions=True)
+    mock_cleanup.assert_called_once()
+
+
+def test_interactive_job_no_cleanup_on_nonzero_exit(mocker):
+    """lain job -i, exit 1 must NOT clean up and must propagate exit code."""
+    _, mock_cleanup = _setup_interactive_job_mocks(mocker, exec_returncode=1)
+
+    from click.testing import CliRunner
+
+    from lain_cli.lain import lain
+
+    runner = CliRunner(mix_stderr=False)
+    result = runner.invoke(
+        lain, ["job", "-i", "--force", "bash"], catch_exceptions=True
+    )
+    mock_cleanup.assert_not_called()
+    assert result.exit_code == 1
+
+
+def test_interactive_job_no_cleanup_on_ctrl_c(mocker):
+    """lain job -i, Ctrl+C must NOT clean up and must exit 130."""
+    _, mock_cleanup = _setup_interactive_job_mocks(
+        mocker, exec_side_effect=KeyboardInterrupt()
+    )
+
+    from click.testing import CliRunner
+
+    from lain_cli.lain import lain
+
+    runner = CliRunner(mix_stderr=False)
+    result = runner.invoke(
+        lain, ["job", "-i", "--force", "bash"], catch_exceptions=True
+    )
+    mock_cleanup.assert_not_called()
+    assert result.exit_code == 130

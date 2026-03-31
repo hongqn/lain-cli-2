@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: {{ timeout | default(86400) }}
+  activeDeadlineSeconds: {{ (timeout | default(86400)) + 60 }}
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
