@@ -18,7 +18,7 @@ Windows
 * lain 支持在 PowerShell 下使用, 但建议尽量不要, 首选 WSL 里使用
 * 如果你有难言之隐, 必须要在 PowerShell 下安装和使用 lain, 这里是一些安装流程的备忘:
 
-  * 记得将 lain 的 cli 执行文件所在的目录加入 :code:`$PATH`, 如果你没有使用 virtualenv, 那么这个路径一般是 :code:`c:\users\$UESR\appdata\roaming\python\python310\Scripts`
+  * 记得将 lain 的 cli 执行文件所在的目录加入 :code:`$PATH`, 如果你没有使用 virtualenv, 那么这个路径一般是 :code:`c:\users\$USER\appdata\roaming\python\python310\Scripts`
   * 添加 env: :code:`PYTHONUTF8=1`, 否则 lain 可能会因为你系统的默认编码不匹配而报错
 
 * lain 依赖的各种第三方程序, 都需要在 PowerShell 里安装好, 以 choco 为例, 可以这样安装:
@@ -45,7 +45,7 @@ Mac OS
     # 首先需要安装 virtualenvwrapper, 如果你不熟悉, 可以直接参考官网的快速上手: https://virtualenvwrapper.readthedocs.io/en/latest/
 
     # lain 必须安装在自己专用的 virtualenv 下, 没办法, 依赖太杂乱了, 怕搞坏你的环境
-    mkvirtualenv lain-cli --python=[abs path for python>=3.8]
+    mkvirtualenv lain-cli --python=[abs path for python>=3.10]
     workon lain-cli
     pip install -U lain_cli -i https://gitlab.example.com/api/v4/projects/9/packages/pypi/simple --extra-index-url https://mirrors.cloud.tencent.com/pypi/simple/
 
