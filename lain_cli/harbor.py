@@ -1,3 +1,7 @@
+from typing import Any
+
+import requests
+
 from lain_cli.utils import (
     RegistryUtils,
     RequestClientMixin,
@@ -7,7 +11,12 @@ from lain_cli.utils import (
 
 
 class HarborRegistry(RequestClientMixin, RegistryUtils):
-    def __init__(self, registry=None, harbor_token=None, **kwargs):
+    def __init__(
+        self,
+        registry: str | None = None,
+        harbor_token: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         if not all([registry, harbor_token]):
             cc = tell_cluster_config()
             registry = cc["registry"]
@@ -15,6 +24,8 @@ class HarborRegistry(RequestClientMixin, RegistryUtils):
                 raise ValueError("harbor_token not provided in cluster config")
             harbor_token = cc["harbor_token"]
 
+        assert registry is not None
+        assert harbor_token is not None
         self.registry = registry
         try:
             host, project = registry.split("/")
@@ -28,7 +39,7 @@ class HarborRegistry(RequestClientMixin, RegistryUtils):
         }
         self.project = project
 
-    def request(self, *args, **kwargs):
+    def request(self, *args: Any, **kwargs: Any) -> requests.Response:
         res = super().request(*args, **kwargs)
         responson = res.json()
         if not isinstance(responson, dict):
@@ -38,7 +49,7 @@ class HarborRegistry(RequestClientMixin, RegistryUtils):
             raise ValueError(f"harbor error: {errors}")
         return res
 
-    def list_repos(self):
+    def list_repos(self) -> list[str]:
         res = self.get(
             f"/projects/{self.project}/repositories", params={"page_size": 100}
         )
@@ -46,7 +57,7 @@ class HarborRegistry(RequestClientMixin, RegistryUtils):
         repos = [dic["name"].split("/")[-1] for dic in responson]
         return repos
 
-    def list_tags(self, repo_name, **kwargs):
+    def list_tags(self, repo_name: str, **kwargs: Any) -> list[str]:
         repo_name = repo_name.split("/")[-1]
         res = self.get(
             f"/projects/{self.project}/repositories/{repo_name}/artifacts",

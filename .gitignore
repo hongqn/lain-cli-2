@@ -13,3 +13,4 @@ docker-image/config.json
 .cache
 public
 *.bak
+.local/

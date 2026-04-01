@@ -1,6 +1,8 @@
 from inspect import cleandoc
+from typing import Any
 from urllib.parse import urlparse
 
+import requests
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from lain_cli.utils import (
@@ -16,7 +18,7 @@ from lain_cli.utils import (
 )
 
 
-def tell_webhook_client(hook_url=None):
+def tell_webhook_client(hook_url: str | None = None) -> "Webhook | None":
     ctx = context()
     obj = ctx.obj
     config = obj.get("values", {}).get("webhook", {})
@@ -40,16 +42,18 @@ class Webhook(RequestClientMixin):
     deploy_message_template = template_env.get_template("deploy-webhook-message.txt.j2")
     k8s_secret_diff_template = template_env.get_template("k8s-secret-diff.txt.j2")
 
-    def __init__(self, endpoint=None, **kwargs):
+    def __init__(self, endpoint: str | None = None, **kwargs: Any) -> None:
         self.endpoint = endpoint
 
-    def send_msg(self, msg):
+    def send_msg(self, msg: str) -> requests.Response:
         raise NotImplementedError
 
-    def diff_k8s_secret(self, old, new):
+    def diff_k8s_secret(
+        self, old: dict[str, Any], new: dict[str, Any]
+    ) -> requests.Response | None:
         secret_name = old["metadata"]["name"]
         diff = diff_dict(old["data"], new["data"])
-        if not sum(len(l) for l in diff.values()):
+        if not sum(len(changes) for changes in diff.values()):
             # do not send notification on empty diff
             return
         ctx = context()
@@ -62,8 +66,11 @@ class Webhook(RequestClientMixin):
         return self.send_msg(report)
 
     def send_deploy_message(
-        self, stderr=None, rollback_revision=None, previous_revision=None
-    ):
+        self,
+        stderr: str | None = None,
+        rollback_revision: str | None = None,
+        previous_revision: str | None = None,
+    ) -> requests.Response:
         ctx = context()
         obj = ctx.obj
         git_revision = obj.get("git_revision")
@@ -103,7 +110,7 @@ class Webhook(RequestClientMixin):
 
 class FeishuWebhook(Webhook):
     @retry(reraise=True, wait=wait_fixed(2), stop=stop_after_attempt(6))
-    def send_msg(self, msg):
+    def send_msg(self, msg: str) -> requests.Response:
         payload = {
             "msg_type": "text",
             "content": {
@@ -114,7 +121,7 @@ class FeishuWebhook(Webhook):
 
 
 class SlackIncomingWebhook(Webhook):
-    def __init__(self, endpoint=None, **kwargs):
+    def __init__(self, endpoint: str | None = None, **kwargs: Any) -> None:
         super().__init__(endpoint=endpoint, **kwargs)
         channel = kwargs.get("channel")
         if not channel:
@@ -124,7 +131,7 @@ class SlackIncomingWebhook(Webhook):
         self.channel = channel
 
     @retry(reraise=True, wait=wait_fixed(2), stop=stop_after_attempt(6))
-    def send_msg(self, msg):
+    def send_msg(self, msg: str) -> requests.Response:
         payload = {
             "channel": self.channel,
             "text": msg,

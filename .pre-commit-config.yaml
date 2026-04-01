@@ -5,7 +5,7 @@ repos:
       - id: check-useless-excludes
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: check-yaml
         exclude: lain_cli/chart_template
@@ -13,7 +13,7 @@ repos:
       - id: trailing-whitespace
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.0
+    rev: v0.15.8
     hooks:
       - id: ruff-check
         args:
@@ -21,7 +21,7 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/jendrikseipp/vulture
-    rev: v2.14
+    rev: v2.16
     hooks:
       - id: vulture
         types:
@@ -35,6 +35,12 @@ repos:
       - id: gitlint
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.32.0
+    rev: v1.44.0
     hooks:
       - id: typos
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.408
+    hooks:
+      - id: pyright
+        language: system

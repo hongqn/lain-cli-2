@@ -1,3 +1,5 @@
+from typing import Any
+
 from lain_cli.utils import format_kubernetes_memory, parse_size
 
 # lain lint config
@@ -6,20 +8,20 @@ MEMORY_FORGIVING_COEFFICIENT = 1.13
 MEMORY_FORGIVING_POOR_MEMORY = parse_size("256Mi", binary=True)
 
 
-def suggest_cpu_limits(limits):
+def suggest_cpu_limits(limits: int | float) -> str | bool:
     if limits < 1000:
         return "1000m"
     return False
 
 
-def suggest_cpu_requests(requests, top):
+def suggest_cpu_requests(requests: int | float, top: int | float) -> str | bool:
     if requests < top - 300 or requests > top + 300:
         suggest_str = f"{top}m"
         return suggest_str
     return False
 
 
-def suggest_memory_requests(requests, top):
+def suggest_memory_requests(requests: int | float, top: int | float) -> str | bool:
     # 对于内存需求太穷的应用, 就不麻烦人家了
     if top < MEMORY_FORGIVING_POOR_MEMORY and requests < MEMORY_FORGIVING_POOR_MEMORY:
         return False
@@ -33,7 +35,9 @@ def suggest_memory_requests(requests, top):
     return False
 
 
-def suggest_memory_limits(limits, top, proc=None):
+def suggest_memory_limits(
+    limits: int | float, top: int | float, proc: dict[str, Any] | None = None
+) -> str | bool:
     proc = proc or {}
     if proc.get("replicaCount", 0) > 5:
         top_to_limits = 1.3

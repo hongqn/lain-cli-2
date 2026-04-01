@@ -7,6 +7,7 @@
 2. 安装 lain
 
 ```sh
+# Python 3.10+ is required for the typed CLI runtime
 pip install lain -i https://pypi.0xgl.xyz
 ```
 
@@ -27,7 +28,7 @@ lain use grandline
 | 外网可访问 | `0xnftsee.xyz`, `uninvitedelephant.xyz` | `gl-test.xyz`         |
 | 仅内网访问 | `0xgl.xyz`                              | `test.0xgl.xyz`       |
 
-只支持一级子域名，如 `ue.gl-test.xyz` 这样的形式，不支持多级子域名，如 `bot.ue.gl-test.xyz` 。
+只支持一级子域名，如 `demo.gl-test.xyz` 这样的形式，不支持多级子域名，如 `bot.demo.gl-test.xyz` 。
 
 # Upstream README:
 
@@ -43,7 +44,7 @@ lain is a DevOps solution, but really, it just helps you with kubectl / helm / d
 
 The recommended way to use lain is to [maintain an internal fork for your team](https://lain-cli.readthedocs.io/en/latest/dev.html#lain), this may be too much, you can still try out lain with the following steps:
 
-- Install from PyPI: `pip install -U lain`
+- Install from PyPI with Python 3.10+: `pip install -U lain`
 - Write cluster values, according to docs [here](https://lain-cli.readthedocs.io/en/latest/dev.html#cluster-values), and examples [here](https://github.com/timfeirg/lain-cli/tree/master/lain_cli/cluster_values), so that lain knows how to talk to your Kubernetes cluster
 - Set `CLUSTER_VALUES_DIR` to the directory that contains all your cluster values
 - Start using lain

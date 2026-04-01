@@ -1,3 +1,5 @@
+from typing import Any
+
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 from tencentcloud.common import credential
 from tencentcloud.common.exception.tencent_cloud_sdk_exception import (
@@ -24,14 +26,19 @@ class TencentClient(RegistryUtils):
     VM_STATES = {"on", "off"}
 
     def __init__(
-        self, registry=None, access_key_id=None, access_key_secret=None, **kwargs
-    ):
+        self,
+        registry: str | None = None,
+        access_key_id: str | None = None,
+        access_key_secret: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         if not all([registry, access_key_id, access_key_secret]):
             cc = tell_cluster_config()
             registry = cc["registry"]
             access_key_id = cc.get("access_key_id")
             access_key_secret = cc.get("access_key_secret")
 
+        assert registry is not None
         self.registry = registry
         self.repo_namespace = registry.split("/")[-1]
         if not all([access_key_id, access_key_secret]):
@@ -43,7 +50,7 @@ class TencentClient(RegistryUtils):
         self.cvm_client = cvm_client.CvmClient(self.cred, "ap-beijing")
         self.tcr_client = TcrClient(self.cred, "ap-beijing")
 
-    def list_repos(self):
+    def list_repos(self) -> list[str] | None:
         req = tcr_models.DescribeImagePersonalRequest()
         req.Limit = 100
         try:
@@ -58,7 +65,7 @@ class TencentClient(RegistryUtils):
         repos = [dic["RepoName"] for dic in repo_info]
         return repos
 
-    def list_tags(self, repo_name, **kwargs):
+    def list_tags(self, repo_name: str, **kwargs: Any) -> list[str] | None:
         req = tcr_models.DescribeImagePersonalRequest()
         req.RepoName = f"{self.repo_namespace}/{repo_name}"
         req.Limit = 100
@@ -81,14 +88,20 @@ class TencentClient(RegistryUtils):
         stop=stop_after_attempt(60),
         retry=retry_if_exception_type(TencentCloudSDKException),
     )
-    def turn_(self, InstanceIds=None, cluster=None, state: str = "on"):
+    def turn_(
+        self,
+        InstanceIds: list[str] | None = None,
+        cluster: str | None = None,
+        state: str = "on",
+    ) -> None:
         if not InstanceIds:
             InstanceIds = tell_cluster_config(cluster).get("instance_ids")
 
         if not InstanceIds:
             warn("instance_ids not defined in cluster info, cannot proceed", exit=1)
 
-        for id_ in InstanceIds:
+        instance_ids = InstanceIds or []
+        for id_ in instance_ids:
             ids = [id_]
             if state.lower() == "off":
                 req = cvm_models.StopInstancesRequest()

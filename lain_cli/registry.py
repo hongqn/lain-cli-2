@@ -1,4 +1,5 @@
 from json.decoder import JSONDecodeError
+from typing import Any
 
 import requests
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -14,11 +15,12 @@ from lain_cli.utils import (
 class Registry(RequestClientMixin, RegistryUtils):
     headers = {"Accept": "application/vnd.docker.distribution.manifest.v2+json"}
 
-    def __init__(self, registry=None, **kwargs):
+    def __init__(self, registry: str | None = None, **kwargs: Any) -> None:
         if not registry:
             cc = tell_cluster_config()
             registry = cc["registry"]
 
+        assert registry is not None
         self.registry = registry
         if "/" in registry:
             host, self.namespace = registry.split("/")
@@ -40,7 +42,7 @@ class Registry(RequestClientMixin, RegistryUtils):
         self.token_fetch_cmd = kwargs.get("registry_token_fetch_cmd")
         self.token_type = kwargs.get("registry_token_type", "Bearer")
 
-    def prepare_token(self, scope):
+    def prepare_token(self, scope: str) -> None:
         if self.token_fetch_cmd:
             res = subprocess_run(
                 self.token_fetch_cmd,
@@ -70,7 +72,7 @@ class Registry(RequestClientMixin, RegistryUtils):
         if token:
             self.headers["Authorization"] = f"{self.token_type} {token}"
 
-    def request(self, *args, **kwargs):
+    def request(self, *args: Any, **kwargs: Any) -> requests.Response:
         res = super().request(*args, **kwargs)
         try:
             responson = res.json()
@@ -83,13 +85,15 @@ class Registry(RequestClientMixin, RegistryUtils):
             raise ValueError(f"registry error: headers {res.headers}, errors {errors}")
         return res
 
-    def list_repos(self):
+    def list_repos(self) -> list[str]:
         path = "/v2/_catalog"
         responson = self.get(path, params={"n": 9999}, timeout=90).json()
         return responson.get("repositories", [])
 
     @retry(reraise=True, wait=wait_fixed(2), stop=stop_after_attempt(6))
-    def delete_image(self, repo, tag=None):
+    def delete_image(
+        self, repo: str, tag: str | None = None
+    ) -> requests.Response | None:
         path = f"/v2/{repo}/manifests/{tag}"
         headers = self.head(path).headers
         docker_content_digest = headers.get("Docker-Content-Digest")
@@ -100,11 +104,17 @@ class Registry(RequestClientMixin, RegistryUtils):
             path, timeout=20
         )  # 不知道为啥删除操作就是很慢, 只好在这里单独放宽
 
-    def list_tags(self, repo_name, n=None, timeout=90):
+    def list_tags(
+        self,
+        repo_name: str,
+        n: int | None = None,
+        timeout: int = 90,
+        **kwargs: Any,
+    ) -> list[str]:
         repo = f"{self.namespace}/{repo_name}" if self.namespace else repo_name
         path = f"/v2/{repo}/tags/list"
         self.prepare_token(scope=f"repository:{repo}:pull,push")
-        responson = self.get(path, params={"n": 1000}, timeout=timeout).json()
+        responson = self.get(path, params={"n": 1000}, timeout=timeout, **kwargs).json()
         if "tags" not in responson:
             return []
         tags = self.sort_and_filter(responson.get("tags") or [], n=n)

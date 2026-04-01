@@ -8,13 +8,14 @@ from copy import deepcopy
 from os import getcwd as cwd
 from os.path import basename, dirname, exists, expanduser, isfile, join
 from time import sleep, time
+from typing import Any, cast
 
 import click
-import packaging
 import requests
 from click import BadParameter
 from humanfriendly import InvalidTimespan, parse_size, parse_timespan
 from jinja2 import Template
+from packaging import version as packaging_version
 
 from lain_cli import __version__
 from lain_cli.kibana import Kibana
@@ -159,7 +160,7 @@ from lain_cli.webhook import tell_webhook_client
 )
 @click.option(
     "--use",
-    type=click.Choice(CLUSTERS),
+    type=click.Choice(list(CLUSTERS)),
     help="same as lain use, use this if you are afraid of accidentally execute command against the wrong cluster",
 )
 @click.option(
@@ -169,7 +170,16 @@ from lain_cli.webhook import tell_webhook_client
     help="automatically does the best thing (if there is one).",
 )
 @click.pass_context
-def lain(ctx, silent, verbose, ignore_lint, remote_docker, values, use, auto_pilot):
+def lain(
+    ctx: click.Context,
+    silent: bool,
+    verbose: bool,
+    ignore_lint: bool,
+    remote_docker: bool,
+    values: Any,
+    use: str | None,
+    auto_pilot: bool,
+) -> None:
     """DevOps with minimal effort"""
     ctx.obj["silent"] = silent
     ctx.obj["verbose"] = verbose
@@ -190,7 +200,7 @@ def lain(ctx, silent, verbose, ignore_lint, remote_docker, values, use, auto_pil
 
 
 @lain.group()
-def admin():
+def admin() -> None:
     """admin functionalities, stay away"""
 
 
@@ -200,7 +210,7 @@ def admin():
     is_flag=True,
 )
 @click.pass_context
-def delete_bad_ing(ctx, dry_run):
+def delete_bad_ing(ctx: click.Context, dry_run: bool) -> None:
     ctx.obj["silent"] = True
     ing_list = ensure_str(
         kubectl(
@@ -250,7 +260,7 @@ def delete_bad_ing(ctx, dry_run):
     "--dry-run",
     is_flag=True,
 )
-def delete_bad_pod(dry_run):
+def delete_bad_pod(dry_run: bool) -> None:
     jobs = kubectl(
         "get",
         "job",
@@ -285,18 +295,21 @@ def delete_bad_pod(dry_run):
 
 
 @admin.command()
-def cleanup_registry():
+def cleanup_registry() -> None:
     res = kubectl("get", "po", "-ojsonpath={..image}", capture_output=True)
     running_image_tags = frozenset(
         [image.split(":", 1)[-1] for image in ensure_str(res.stdout).split()]
     )
     protected_tags = {"prepare", "latest"}
     registry = tell_registry_client()
-    repos = registry.list_repos()
+    if not registry:
+        error("registry client not available", exit=True)
+        return
+    repos = registry.list_repos() or []
     for repo in repos:
         if registry.is_protected_repo(repo):
             continue
-        tags = set(registry.list_tags(repo))
+        tags = set(registry.list_tags(repo) or [])
         recent_tags = frozenset(registry.sort_and_filter(tags)[:20])
         ancient_tags = tags - recent_tags - protected_tags - running_image_tags
         for tag in ancient_tags:
@@ -306,9 +319,12 @@ def cleanup_registry():
 
 @admin.command()
 @click.pass_context
-def list_images(ctx):
+def list_images(ctx: click.Context) -> None:
     ctx.obj["silent"] = True
     registry = tell_registry_client()
+    if not registry:
+        error("registry client not available", exit=True)
+        return
     images = registry.list_images()
     for image in images:
         echo(image)
@@ -444,14 +460,14 @@ def start_cvm(instance_ids):
 
 
 @admin.command()
-@click.argument("state", nargs=1, type=click.Choice(TencentClient.VM_STATES))
+@click.argument("state", nargs=1, type=click.Choice(list(TencentClient.VM_STATES)))
 @click.pass_context
-def turn(ctx, state):
+def turn(ctx: click.Context, state: str) -> None:
     """\b
     turn off currently used cluster, to save money"""
+    cluster = ctx.obj["cluster"]
     current_state = wait_for_cluster_up()
     if current_state != state:
-        cluster = ctx.obj["cluster"]
         client = TencentClient()
         client.turn_(cluster=cluster, state=state)
 
@@ -495,12 +511,15 @@ def list_waste():
     help="specify cluster config yaml",
 )
 @click.pass_context
-def migrate_registry(ctx, cc_path):
+def migrate_registry(ctx: click.Context, cc_path: str) -> None:
     data = yalo(cc_path)
     schema = ClusterConfigSchema(context={"is_current": True})
-    cc = schema.load(data)
+    cc = cast(dict[str, Any], schema.load(data))
     registry_addr = cc["registry"]
     dest_registry = tell_registry_client(cc)
+    if not dest_registry:
+        error("destination registry client not available", exit=True)
+        return
     existing_images = dest_registry.list_images()
 
     def tell_tag(image):
@@ -508,6 +527,9 @@ def migrate_registry(ctx, cc_path):
 
     tags = set(tell_tag(s) for s in existing_images)
     registry = tell_registry_client()
+    if not registry:
+        error("source registry client not available", exit=True)
+        return
     images = registry.list_images()
     for image in images:
         if tell_tag(image) in tags:
@@ -643,7 +665,7 @@ def lint(ctx, simple):
     chart_yaml = f"./{CHART_DIR_NAME}/Chart.yaml"
     chart = yalo(chart_yaml)
     current_version_str = chart.get("version") or "0.1.0"
-    current_version = packaging.version.parse(current_version_str)
+    current_version = packaging_version.parse(current_version_str)
     if current_version < CHART_VERSION:
         error(f"chart version too low: {current_version}")
         error(
@@ -865,7 +887,13 @@ def status(ctx, simple):
     help="use stern instead of kubectl, which is better looking",
 )
 @click.pass_context
-def logs(ctx, proc, tail, use_stern, use_kibana):
+def logs(
+    ctx: click.Context,
+    proc: tuple[str, ...],
+    tail: int,
+    use_stern: bool,
+    use_kibana: bool,
+) -> None:
     """
     print container logs.
 
@@ -880,28 +908,30 @@ def logs(ctx, proc, tail, use_stern, use_kibana):
 
     release_name = tell_release_name()
     values = ctx.obj.get("values", {})
-    proc = proc[0] if proc else None
+    proc_name = proc[0] if proc else None
     selector = None
     deploy_names = set(values.get("deployments") or [])
     cronjob_names = set(values.get("cronjobs") or [])
     job_names = set(values.get("jobs") or [])
 
-    if proc in deploy_names:
-        selector = f"app.kubernetes.io/instance={release_name}-{proc}"
-    elif proc in cronjob_names | job_names:
-        kibana_url = tell_kibana_url(proc)
+    if proc_name in deploy_names:
+        selector = f"app.kubernetes.io/instance={release_name}-{proc_name}"
+    elif proc_name in cronjob_names | job_names:
+        kibana_url = tell_kibana_url(proc_name)
         warn(
             f"kubernetes jobs are cleaned up fast, consider heading to kibana for complete logs:\n {kibana_url}"
         )
-        selector = f"app.kubernetes.io/instance={release_name}-{proc}"
-    elif not proc:
+        selector = f"app.kubernetes.io/instance={release_name}-{proc_name}"
+    elif not proc_name:
         selector = f"helm.sh/chart={release_name}"
     else:
         proc_names = deploy_names | cronjob_names | job_names
-        error(f"proc {proc} not found, choose from {proc_names}", exit=1)
+        error(f"proc {proc_name} not found, choose from {proc_names}", exit=1)
+        return
 
     if use_kibana:
-        return open_kibana_url(release_name=release_name, proc=proc)
+        return open_kibana_url(release_name=release_name, proc=proc_name)
+    assert selector is not None
     if use_stern:
         stern(f"--selector={selector}", f"--tail={tail}", check=False)
     else:
@@ -972,19 +1002,19 @@ def logs(ctx, proc, tail, use_stern, use_kibana):
 @click.argument("command", nargs=-1)
 @click.pass_context
 def job(
-    ctx,
-    image_tag,
-    head,
-    wait,
-    timeout,
-    memory,
-    user,
-    force,
-    interactive,
-    context,
-    deploy,
-    command,
-):
+    ctx: click.Context,
+    image_tag: str | None,
+    head: bool,
+    wait: bool,
+    timeout: int,
+    memory: str,
+    user: int | None,
+    force: bool,
+    interactive: bool,
+    context: bool,
+    deploy: str | None,
+    command: tuple[str, ...],
+) -> None:
     """creates a Kubernetes Job to run desired command.
 
     \b
@@ -1105,7 +1135,11 @@ def job(
     echo(f" k logs -f -l job-name={job_name}", clean=False)
     echo(f" k delete job {job_name}", clean=False)
     echo("waiting for job container up")
-    pod_name = wait_for_pod_up(selector=f"job-name={job_name}")[0]
+    pod_names = wait_for_pod_up(selector=f"job-name={job_name}")
+    if not pod_names:
+        error(f"no pod found for job {job_name}", exit=1)
+        return
+    pod_name = pod_names[0]
     sh = "zsh" if appname == "lain" else "sh"
     if context:
         src = cwd()
@@ -1127,6 +1161,7 @@ def job(
         except KeyboardInterrupt:
             echo(reattach_hint)
             ctx.exit(130)
+            return
         exit_code = rc(res)
         if exit_code == 0:
             try_to_cleanup_job(job_name)
@@ -1138,6 +1173,9 @@ def job(
         if command:
             kubectl("logs", "-f", "-l", f"job-name={job_name}", timeout=None)
             pod_rc = get_pod_rc(pod_name)
+            if pod_rc is None:
+                ctx.exit(1)
+                return
             ctx.exit(pod_rc)
         else:
             echo("created a container to sleep 1h, you must finish your work within")
@@ -1148,7 +1186,7 @@ def job(
 @lain.command()
 @click.argument("deploy_and_command", nargs=-1)
 @click.pass_context
-def x(ctx, deploy_and_command):
+def x(ctx: click.Context, deploy_and_command: tuple[str, ...]) -> None:
     """
     enter running container and run commands.
 
@@ -1187,8 +1225,10 @@ def x(ctx, deploy_and_command):
             appname = ctx.obj["appname"]
             if not podname:
                 error(f"no pod found for app {appname}", exit=1)
+                return
         else:
             error(f"no pod found for deploy {deploy}", exit=1)
+            return
 
     res = kubectl("exec", "-it", podname, "--", *cmd, check=False, timeout=None)
     ctx.exit(rc(res))
@@ -1197,22 +1237,28 @@ def x(ctx, deploy_and_command):
 @lain.command()
 @click.argument("cronjob_name")
 @click.pass_context
-def create_job(ctx, cronjob_name):
+def create_job(ctx: click.Context, cronjob_name: str) -> None:
     """help you with kubectl create job"""
     release_name = tell_release_name()
     job_name = f"manual-test-{release_name}-{cronjob_name}"
     try_to_cleanup_job(job_name)
     kubectl("create", "job", f"--from=cronjob/{release_name}-{cronjob_name}", job_name)
-    pod_name = wait_for_pod_up(selector=f"job-name={job_name}")[0]
+    pod_names = wait_for_pod_up(selector=f"job-name={job_name}")
+    if not pod_names:
+        error(f"no pod found for job {job_name}", exit=1)
+        return
+    pod_name = pod_names[0]
     kubectl("logs", "-f", pod_name)
 
 
 @lain.command()
-@click.argument("cluster", nargs=-1, type=click.Choice(CLUSTERS))
+@click.argument("cluster", nargs=-1, type=click.Choice(list(CLUSTERS)))
 @click.option("--set-context", is_flag=True, help="set context to configured namespace")
 @click.option("--turn", is_flag=True, help="if shut down, try to boot up this cluster")
 @click.pass_context
-def use(ctx, cluster, set_context, turn):
+def use(
+    ctx: click.Context, cluster: tuple[str, ...], set_context: bool, turn: bool
+) -> None:
     """\b
     point to specified cluster.
 
@@ -1242,15 +1288,19 @@ def use(ctx, cluster, set_context, turn):
 
         ctx.exit(0)
 
+    cluster_name: str | None = None
     if not cluster:
         print_cluster_and_exit()
     else:
         if len(cluster) != 1:
             error(f"provide one cluster only, got {cluster}", exit=True)
+            return
         else:
-            cluster = cluster[0]
+            cluster_name = cluster[0]
 
-    kubeconfig_file = f"~/.kube/kubeconfig-{cluster}"
+    if cluster_name is None:
+        return
+    kubeconfig_file = f"~/.kube/kubeconfig-{cluster_name}"
     src = expanduser(kubeconfig_file)
     if not isfile(src):
         error(
@@ -1261,7 +1311,7 @@ def use(ctx, cluster, set_context, turn):
     dest = join(KUBECONFIG_DIR, "config")
     ensure_absent(dest)
     os.symlink(src, dest)
-    cc = tell_cluster_config(cluster)
+    cc = tell_cluster_config(cluster_name)
     if set_context:
         ns = cc.get("namespace", "default")
         kubectl(
@@ -1278,7 +1328,7 @@ def use(ctx, cluster, set_context, turn):
         echo("wait for cluster up...")
         lain_("admin", "turn", "on", exit=True)
 
-    print_cluster_and_exit(cluster=cluster)
+    print_cluster_and_exit(cluster=cluster_name)
 
 
 @lain.command()
@@ -1362,31 +1412,38 @@ def restart(ctx, procs_or_release_name, selectors, wait, graceful):
     help="use the most recent imageTag from registry",
 )
 @click.pass_context
-def update_image(ctx, procs, deduce):
+def update_image(ctx: click.Context, procs: tuple[str, ...], deduce: bool) -> None:
     """update, and only update image for some proc"""
     values = ctx.obj["values"]
     choices = set(values["procs"].keys())
     if not procs:
         error(f"specify at least one proc, choose from: {choices}", exit=1)
 
-    procs = set(procs)
-    if not procs.issubset(choices):
-        wrong_procs = procs.difference(choices)
+    selected_procs = set(procs)
+    if not selected_procs.issubset(choices):
+        wrong_procs = selected_procs.difference(choices)
         error(f"unknown proc {wrong_procs}, choose from: {choices}", exit=1)
 
     registry = tell_registry_client()
+    if not registry:
+        error("registry client not available", exit=True)
+        return
     appname = ctx.obj["appname"]
     if deduce:
-        recent_tags = registry.list_tags(appname)
+        recent_tags = registry.list_tags(appname) or []
         if not recent_tags:
             error("wow, there's no pushed image at all", exit=1)
+            return
 
         image_tag = recent_tags[0]
     else:
         image_tag = tell_image_tag()
+        if not image_tag:
+            error("cannot determine image tag", exit=1)
+            return
 
     image = registry.make_image(image_tag)
-    for proc in procs:
+    for proc in selected_procs:
         resource_type = "deployment" if proc in values["deployments"] else "cronjob"
         res = kubectl(
             "set",
@@ -1403,14 +1460,15 @@ def update_image(ctx, procs, deduce):
 
 @lain.command()
 @click.argument("msg", nargs=1, type=str)
-def send_msg(msg):
+def send_msg(msg: str) -> None:
     """send webhook message, if applicable."""
     msg = msg.strip()
     if not msg:
         echo("skip due to empty message", exit=0)
 
     webhook = tell_webhook_client()
-    webhook and webhook.send_msg(msg)
+    if webhook:
+        webhook.send_msg(msg)
 
 
 @lain.command()
@@ -1423,7 +1481,7 @@ def send_msg(msg):
 )
 @click.option("--debug", is_flag=True)
 @click.pass_context
-def template(ctx, pairs, debug):
+def template(ctx: click.Context, pairs: tuple[Any, ...], debug: bool) -> None:
     """wrapper for helm template."""
     extra = ("--debug",) if debug else None
     options = tell_helm_options(pairs, deduce_image=False, extra=extra)
@@ -1437,7 +1495,7 @@ def template(ctx, pairs, debug):
 
 @lain.command()
 @click.pass_context
-def rollback(ctx):
+def rollback(ctx: click.Context) -> None:
     """rollback to previous non-pending state revision."""
     appname = ctx.obj["appname"]
     res = helm("history", appname, "-ojson", capture_output=True)
@@ -1454,19 +1512,20 @@ def rollback(ctx):
         revision = rev["revision"]
     except StopIteration:
         error(f"cannot find a non pending state revision in history: {history}", exit=1)
+        return
 
     res = helm("rollback", appname, str(revision), check=False)
     webhook = tell_webhook_client()
     tell_release_image(appname, revision)
     if code := rc(res):
         stderr = ensure_str(res.stderr)
-        webhook and webhook.send_deploy_message(
-            rollback_revision=revision, stderr=stderr
-        )
+        if webhook:
+            webhook.send_deploy_message(rollback_revision=revision, stderr=stderr)
         error(stderr)
         ctx.exit(code)
 
-    webhook and webhook.send_deploy_message(rollback_revision=revision)
+    if webhook:
+        webhook.send_deploy_message(rollback_revision=revision)
     isatty = sys.stdout.isatty()
     if isatty and called_by_sh():
         lain_("status")
@@ -1703,12 +1762,14 @@ def deploy(ctx, pairs, delete_after, build, canary, wait):
         if "job fail" in stderr:
             try_to_print_job_logs()
         else:
-            webhook and webhook.send_deploy_message(stderr=stderr)
+            if webhook:
+                webhook.send_deploy_message(stderr=stderr)
 
         error(stderr)
         ctx.exit(code)
 
-    webhook and webhook.send_deploy_message(previous_revision=previous_revision)
+    if webhook:
+        webhook.send_deploy_message(previous_revision=previous_revision)
 
     re_creation_headsup = False
     if new_image_tag == old_image_tag:
@@ -1791,7 +1852,8 @@ def set_canary_group(ctx, canary_group_name, abort, final):
         update_canary_annotations(canary_name)
         delete_res = helm("delete", canary_name)
         webhook = tell_webhook_client()
-        webhook and webhook.send_deploy_message()
+        if webhook:
+            webhook.send_deploy_message()
         ctx.exit(rc(delete_res))
 
     if canary_group_name and len(canary_group_name) == 1:
@@ -1877,16 +1939,27 @@ def redeploy(ctx):
 )
 @click.argument("appname", nargs=-1)
 @click.pass_context
-def delete(ctx, force, purge, after, appname):
+def delete(
+    ctx: click.Context,
+    force: bool,
+    purge: bool,
+    after: int | None,
+    appname: tuple[str, ...],
+) -> None:
     """delete this app."""
+    release_name = tell_release_name()
+    app_name = ctx.obj["appname"]
     if appname:
         if len(appname) > 1:
             error(f"do not provide more than one appname, got {appname}", exit=1)
-        else:
-            release_name = appname = ctx.obj["appname"] = appname[0]
-    else:
-        appname = ctx.obj["appname"]
-        release_name = tell_release_name()
+            return
+        single_appname = next(iter(appname), None)
+        if single_appname is None:
+            error("appname is missing", exit=1)
+            return
+        app_name = single_appname
+        release_name = app_name
+        ctx.obj["appname"] = app_name
 
     persistentVolumeClaims = ctx.obj["values"].get("persistentVolumeClaims") or {}
     for pvc in persistentVolumeClaims.values():
@@ -1904,7 +1977,7 @@ def delete(ctx, force, purge, after, appname):
     if not after:
         if purge:
             kubectl(
-                "delete", "secret", f"{appname}-env", f"{appname}-secret", check=False
+                "delete", "secret", f"{app_name}-env", f"{app_name}-secret", check=False
             )
 
         helm_delete(release_name, canary_name, exit=True)
@@ -2016,7 +2089,13 @@ def compose(ctx, force):
 )
 @click.argument("command", nargs=-1)
 @click.pass_context
-def run(ctx, proc_name, prepare, user, command):
+def run(
+    ctx: click.Context,
+    proc_name: str | None,
+    prepare: bool,
+    user: int | None,
+    command: tuple[str, ...],
+) -> None:
     """docker run the image for this app.
 
     \b
@@ -2029,6 +2108,7 @@ def run(ctx, proc_name, prepare, user, command):
     """
     if proc_name and prepare:
         raise BadParameter("cannot use --proc with --prepare")
+    image: str
     if proc_name:
         procs = ctx.obj["values"]["procs"]
         proc = procs[proc_name]
@@ -2043,20 +2123,27 @@ def run(ctx, proc_name, prepare, user, command):
         meta = lain_meta()
         image = make_image_str(image_tag=meta)
 
-    command = command or ["bash"]
+    docker_command = list(command) if command else ["bash"]
     opts = ["-it"]
     if user is not None:
         opts.extend(["--user", str(user)])
 
-    res = docker("run", *opts, image, *command, check=False)
+    res = docker("run", *opts, image, *docker_command, check=False)
     if rc(res):
         stderr = ensure_str(res.stderr)
         if "manifest unknown" in stderr:
             registry = tell_registry_client()
+            if not registry:
+                error("registry client not available", exit=True)
+                return
             appname = ctx.obj["appname"]
-            tag = registry.list_tags(appname, n=1)[0]
+            tags = registry.list_tags(appname, n=1) or []
+            if not tags:
+                error(f"no tags found for {appname}", exit=1)
+                return
+            tag = tags[0]
             image = make_image_str(image_tag=tag)
-            docker("run", "-it", image, *command)
+            docker("run", "-it", image, *docker_command)
 
 
 @lain.command()
@@ -2074,7 +2161,14 @@ def run(ctx, proc_name, prepare, user, command):
     help="directory name in which image will be saved to",
 )
 @click.pass_context
-def save(ctx, image, retag, pull, force, output_dir):
+def save(
+    ctx: click.Context,
+    image: tuple[str, ...],
+    retag: str | None,
+    pull: bool,
+    force: bool,
+    output_dir: str,
+) -> None:
     """save docker image to [APPNAME]-[TAG].tar.gz.
 
     \b
@@ -2086,24 +2180,27 @@ def save(ctx, image, retag, pull, force, output_dir):
         lain save alpine:latest --retag ccr.ccs.tencentyun.com/yashi/alpine:latest
         lain save alpine:latest --retag [CLUSTER_NAME]
     """
+    selected_image: str | None = image[0] if image else None
     appname = ctx.obj["appname"]
     meta = lain_meta()
-    if image:
-        image = image[0]
-    else:
+    if not selected_image:
         for image_info in docker_images():
             if image_info["appname"] == appname and image_info["tag"] == meta:
-                image = image_info["image"]
+                selected_image = image_info["image"]
 
-        if not image:
+        if not selected_image:
             tag = tell_image_tag()
-            image = make_image_str(tag=tag)
+            if not tag:
+                error(f"image not found for {appname}", exit=True)
+                return
+            selected_image = make_image_str(image_tag=tag)
 
-    if not image:
+    if not selected_image:
         error(f"image not found for {appname}", exit=True)
+        return
 
     fname = docker_save(
-        image, output_dir=output_dir, retag=retag, force=force, pull=pull
+        selected_image, output_dir=output_dir, retag=retag, force=force, pull=pull
     )
     echo(fname)
     ctx.exit(0)
@@ -2220,7 +2317,8 @@ def addfile(ctx, f, overwrite):
     new = deepcopy(env_dic)
     res = kubectl_apply(env_dic, tee=True)
     webhook = tell_webhook_client()
-    webhook and webhook.diff_k8s_secret(old, new)
+    if webhook:
+        webhook.diff_k8s_secret(old, new)
     auto_pilot = ctx.obj.get("auto_pilot")
     if auto_pilot and tell_change_from_kubectl_output(ensure_str(res.stdout)):
         lain_("restart", "--graceful")
@@ -2250,7 +2348,8 @@ def env_add(ctx, pairs):
     new = deepcopy(env_dic)
     res = kubectl_apply(env_dic, capture_output=True, tee=True)
     webhook = tell_webhook_client()
-    webhook and webhook.diff_k8s_secret(old, new)
+    if webhook:
+        webhook.diff_k8s_secret(old, new)
     auto_pilot = ctx.obj.get("auto_pilot")
     if auto_pilot and tell_change_from_kubectl_output(ensure_str(res.stdout)):
         lain_("restart", "--graceful")
@@ -2319,7 +2418,8 @@ def add(ctx, files):
     new = deepcopy(secret_dic)
     res = kubectl_apply(secret_dic, tee=True)
     webhook = tell_webhook_client()
-    webhook and webhook.diff_k8s_secret(old, new)
+    if webhook:
+        webhook.diff_k8s_secret(old, new)
     auto_pilot = ctx.obj.get("auto_pilot")
     if auto_pilot and tell_change_from_kubectl_output(ensure_str(res.stdout)):
         lain_("restart", "--graceful")

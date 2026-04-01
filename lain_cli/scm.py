@@ -1,11 +1,12 @@
 from random import choices
+from typing import Any
 
 import gitlab
 
 from lain_cli.utils import error, must_get_env, tell_cluster_config, warn
 
 
-def tell_scm():
+def tell_scm() -> "GitLabSCM":
     cc = tell_cluster_config()
     endpoint = cc.get("gitlab")
     if not endpoint:
@@ -15,29 +16,31 @@ def tell_scm():
         "GITLAB_API_TOKEN",
         f"get your own token at {endpoint}/-/profile/personal_access_tokens",
     )
+    assert endpoint is not None
+    assert token is not None
     return GitLabSCM(endpoint, token)
 
 
 class GitLabSCM:
-    def __init__(self, endpoint, token):
+    def __init__(self, endpoint: str, token: str) -> None:
         self.endpoint = endpoint.rstrip("/")
         self.gl = gitlab.Gitlab(self.endpoint, private_token=token)
 
-    def is_approved(self, project_path, mr_id):
+    def is_approved(self, project_path: str, mr_id: int | str) -> bool:
         pj = self.gl.projects.get(project_path)
         mr = pj.mergerequests.get(mr_id)
         approvals = mr.approvals.get()
         return approvals.approved
 
     @staticmethod
-    def is_active(u):
+    def is_active(u: dict[str, Any] | None) -> bool:
         if not u:
             return False
         if u.get("state") != "active":
             return False
         return True
 
-    def assign_mr(self, project_path, mr_id):
+    def assign_mr(self, project_path: str, mr_id: int | str) -> Any:
         pj = self.gl.projects.get(project_path)
         mr = pj.mergerequests.get(mr_id)
         reviewers = mr.reviewers
@@ -56,7 +59,7 @@ class GitLabSCM:
         author_names = {author["name"], author["username"]}
         candidates = []
 
-        def add_attr(s, model, attr):
+        def add_attr(s: set[str], model: Any, attr: str) -> None:
             if hasattr(model, attr):
                 s.add(getattr(model, attr))
 

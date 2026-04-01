@@ -39,7 +39,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/timfeirg/lain-cli",
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     version=__version__,
     packages=find_packages(),
     include_package_data=True,
