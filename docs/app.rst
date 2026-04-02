@@ -316,6 +316,7 @@ runtime 期间也有许许多多的事情需要开发者处理, 比如:
 * :code:`lain restart` 重启所有容器. 虽说是重启, 但其实是调用 :code:`kubectl delete pod` 来删除容器, 然后 Kubernetes 会进行重建.
 * :code:`lain x` 进入容器内执行命令, 该功能仅用于调试, 原则上不鼓励用于进行生产环境操作, 因为运行资源难以保证.
 * :code:`lain job` 会启动一个 Kubernetes Job 容器, 来执行你给定的命令. 如果未给定命令, 则进入容器内, 打开 shell 进行交互操作.
+* :code:`lain job x` 可以进入已经存在的 Job 容器, 用法类似 :code:`lain x`. 默认会挑选当前应用最近一个正在运行的 Job Pod; 如果第一个参数正好是运行中的 job 名, 就优先进入该 Job, 否则就把这些参数当作容器内要执行的命令. 如果想直接进入 :code:`bash`, 也保持同样的约定, 直接写 :code:`lain job x bash` 或 :code:`lain job x <job-name> bash` 即可. 当命令自身带选项时, 也建议用 :code:`--` 隔开.
 
 以上也仅仅是对 lain 比较常用的功能做简单介绍. 需求千奇百怪, 在文档里也很难覆盖全, 建议你时不时阅读 :code:`lain --help`, 来探索还有什么别的好用的功能.
 
