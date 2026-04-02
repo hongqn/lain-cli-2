@@ -1248,6 +1248,8 @@ def job(
     \b
         # when CWD is a lain app, will start a container using the same environment (same image, same env / secrets)
         lain job -- ./manage.py migrate
+        # explicitly choose which deployment template to reference
+        lain job --deploy worker -- bash
     \b
         # when CWD isn't a lain app, the job will use the lain image instead, lain image is "battery included"
         lain job -i -- mysql -hmysql -uroot -pxxx
