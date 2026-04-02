@@ -1005,7 +1005,8 @@ def enter_job_container(
         error(f"no running job pod found for app {appname}", exit=1)
         return
 
-    cmd = cmd or ["bash"]
+    default_shell = "zsh" if appname == "lain" else "sh"
+    cmd = cmd or [default_shell]
     res = kubectl("exec", "-it", pod_name, "--", *cmd, check=False, timeout=None)
     ctx.exit(rc(res))
 

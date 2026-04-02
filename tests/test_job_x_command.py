@@ -38,7 +38,30 @@ def test_lain_job_x_uses_latest_running_job_pod(monkeypatch):
     assert picked == [(APPNAME, None)]
     assert kubectl_calls == [
         (
-            ("exec", "-it", "dummy-job-pod", "--", "bash"),
+            ("exec", "-it", "dummy-job-pod", "--", "sh"),
+            {"check": False, "timeout": None},
+        )
+    ]
+
+
+def test_lain_job_x_uses_zsh_for_lain_jobs(monkeypatch):
+    kubectl_calls = []
+
+    def fake_pick_job_pod(appname, job_name=None):
+        return "lain-job-pod"
+
+    def fake_kubectl(*args, **kwargs):
+        kubectl_calls.append((args, kwargs))
+        return CompletedProcess(args=args, returncode=0)
+
+    monkeypatch.setattr(lain_module, "pick_job_pod", fake_pick_job_pod)
+    monkeypatch.setattr(lain_module, "kubectl", fake_kubectl)
+
+    run_cli(monkeypatch, args=["job", "x"], obj={"appname": "lain"})
+
+    assert kubectl_calls == [
+        (
+            ("exec", "-it", "lain-job-pod", "--", "zsh"),
             {"check": False, "timeout": None},
         )
     ]
