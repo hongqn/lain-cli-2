@@ -9,7 +9,7 @@ lain 需要调用 kubectl, docker, helm, stern (可选). 这些工具都需要�
 --------
 
 * 安装了 docker 以后, 你还需要进行 :code:`docker login`, 登录对应集群的 registry.
-* 如果你用 asdf 管理 kubectl, 建议保证 :code:`~/.asdf/shims` 在 :code:`PATH` 里优先于其他 kubectl 所在目录. 否则你手工执行的 kubectl 可能仍会命中旧二进制, 和 lain 内部实际使用的 kubectl 不一致. 排查时可以依次执行 :code:`which kubectl`, :code:`asdf current kubectl`, :code:`asdf which kubectl`.
+* 如果你用 asdf 管理 kubectl, 建议保证 :code:`~/.asdf/shims` 在 :code:`PATH` 里优先于其他 kubectl 所在目录. 否则你手工执行的 kubectl 可能仍会命中旧二进制, 和 lain 内部实际使用的 kubectl 不一致. 排查时可以依次执行 :code:`which kubectl`, :code:`asdf current kubectl`, :code:`asdf which kubectl`. lain 默认会在检测到这种 shadowing 时给出 warning, 但同一台机器最多每 30 天提示一次. 如果你明确知道这是预期行为, 可以设置 :code:`LAIN_SUPPRESS_SHADOWED_KUBECTL_WARNING=true` 永久关闭这条 warning.
 
 Windows
 ^^^^^^^

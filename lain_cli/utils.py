@@ -80,6 +80,9 @@ CHART_DIR_NAME = "chart"
 CHART_VERSION = version.parse("0.1.11")
 LOOKOUT_ENV = {"http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"}
 KUBECONFIG_DIR = expanduser("~/.kube")
+SHADOWED_KUBECTL_WARNING_ENV = "LAIN_SUPPRESS_SHADOWED_KUBECTL_WARNING"
+SHADOWED_KUBECTL_WARNING_FILE = "shadowed-kubectl-warning"
+SHADOWED_KUBECTL_WARNING_SNOOZE_SECONDS = 30 * 24 * 60 * 60
 HELM_MIN_VERSION_STR = "v3.8.0"
 HELM_MIN_VERSION = version.parse(HELM_MIN_VERSION_STR)
 STERN_MIN_VERSION_STR = "1.11.0"
@@ -1759,6 +1762,41 @@ def tell_kubectl_binary() -> str:
     raise FileNotFoundError("kubectl")
 
 
+def tell_shadowed_kubectl_warning_file() -> str:
+    return join(click.get_app_dir(package_name), SHADOWED_KUBECTL_WARNING_FILE)
+
+
+def shadowed_kubectl_warning_is_disabled() -> bool:
+    val = (ENV.get(SHADOWED_KUBECTL_WARNING_ENV) or "").lower()
+    return val in {"1", "true", "yes", "on"}
+
+
+def should_warn_about_shadowed_kubectl() -> bool:
+    if shadowed_kubectl_warning_is_disabled():
+        return False
+    warning_file = tell_shadowed_kubectl_warning_file()
+    try:
+        warned_at = os.path.getmtime(warning_file)
+    except FileNotFoundError:
+        return True
+    except OSError as e:
+        warn(f"failed to read kubectl warning state from {warning_file}: {e}")
+        return True
+    return time() - warned_at >= SHADOWED_KUBECTL_WARNING_SNOOZE_SECONDS
+
+
+def remember_shadowed_kubectl_warning() -> None:
+    warning_file = tell_shadowed_kubectl_warning_file()
+    warned_at = time()
+    try:
+        makedirs(dirname(warning_file), exist_ok=True)
+        with open(warning_file, "a"):
+            pass
+        os.utime(warning_file, (warned_at, warned_at))
+    except OSError as e:
+        warn(f"failed to persist kubectl warning state in {warning_file}: {e}")
+
+
 @lru_cache(maxsize=None)
 def warn_if_kubectl_is_shadowed():
     asdf_kubectl = asdf_which("kubectl")
@@ -1769,9 +1807,12 @@ def warn_if_kubectl_is_shadowed():
         return
     expected_shim = tell_asdf_shim("kubectl", asdf_kubectl)
     if shell_kubectl not in {asdf_kubectl, expected_shim}:
+        if not should_warn_about_shadowed_kubectl():
+            return
         warn(
             f"shell kubectl resolves to {shell_kubectl}, while asdf selected {asdf_kubectl}; lain will use the asdf-managed kubectl. put {dirname(expected_shim)} earlier in PATH if you want manual kubectl to match"
         )
+        remember_shadowed_kubectl_warning()
 
 
 def clear_kubectl_caches():

@@ -1,3 +1,4 @@
+import os
 from subprocess import CompletedProcess
 
 import lain_cli.utils as utils
@@ -48,12 +49,13 @@ def test_tell_kubectl_binary_falls_back_to_path(monkeypatch):
     assert utils.tell_kubectl_binary() == "/usr/local/bin/kubectl"
 
 
-def test_warn_if_kubectl_is_shadowed_warns_once(monkeypatch):
+def test_warn_if_kubectl_is_shadowed_warns_once(monkeypatch, tmp_path):
     asdf_path = "/Users/test/.asdf/installs/kubectl/1.30.0/bin/kubectl"
     warnings = []
     clear_caches()
     setup_asdf(monkeypatch, asdf_path)
     monkeypatch.setattr(utils.shutil, "which", lambda name: f"/usr/local/bin/{name}")
+    monkeypatch.setattr(utils.click, "get_app_dir", lambda _: str(tmp_path))
     monkeypatch.setattr(
         utils, "warn", lambda message, **kwargs: warnings.append(message)
     )
@@ -65,6 +67,90 @@ def test_warn_if_kubectl_is_shadowed_warns_once(monkeypatch):
     assert "/usr/local/bin/kubectl" in warnings[0]
     assert asdf_path in warnings[0]
     assert "asdf-managed kubectl" in warnings[0]
+
+
+def test_warn_if_kubectl_is_shadowed_records_warning_timestamp(monkeypatch, tmp_path):
+    asdf_path = "/Users/test/.asdf/installs/kubectl/1.30.0/bin/kubectl"
+    warnings = []
+    clear_caches()
+    setup_asdf(monkeypatch, asdf_path)
+    monkeypatch.setattr(utils.shutil, "which", lambda name: f"/usr/local/bin/{name}")
+    monkeypatch.setattr(utils.click, "get_app_dir", lambda _: str(tmp_path))
+    monkeypatch.setattr(
+        utils, "warn", lambda message, **kwargs: warnings.append(message)
+    )
+
+    utils.warn_if_kubectl_is_shadowed()
+
+    warning_file = tmp_path / utils.SHADOWED_KUBECTL_WARNING_FILE
+    assert len(warnings) == 1
+    assert warning_file.is_file()
+
+
+def test_warn_if_kubectl_is_shadowed_is_snoozed_for_30_days(monkeypatch, tmp_path):
+    asdf_path = "/Users/test/.asdf/installs/kubectl/1.30.0/bin/kubectl"
+    warning_file = tmp_path / utils.SHADOWED_KUBECTL_WARNING_FILE
+    warnings = []
+    now = 1000.0
+    clear_caches()
+    setup_asdf(monkeypatch, asdf_path)
+    monkeypatch.setattr(utils.shutil, "which", lambda name: f"/usr/local/bin/{name}")
+    monkeypatch.setattr(utils.click, "get_app_dir", lambda _: str(tmp_path))
+    monkeypatch.setattr(utils, "time", lambda: now)
+    monkeypatch.setattr(
+        utils, "warn", lambda message, **kwargs: warnings.append(message)
+    )
+    warning_file.parent.mkdir(parents=True, exist_ok=True)
+    warning_file.write_text("")
+    recent = now - utils.SHADOWED_KUBECTL_WARNING_SNOOZE_SECONDS + 1
+    os.utime(warning_file, (recent, recent))
+
+    utils.warn_if_kubectl_is_shadowed()
+
+    assert warnings == []
+
+
+def test_warn_if_kubectl_is_shadowed_warns_again_after_30_days(monkeypatch, tmp_path):
+    asdf_path = "/Users/test/.asdf/installs/kubectl/1.30.0/bin/kubectl"
+    warning_file = tmp_path / utils.SHADOWED_KUBECTL_WARNING_FILE
+    warnings = []
+    now = float(utils.SHADOWED_KUBECTL_WARNING_SNOOZE_SECONDS + 100)
+    clear_caches()
+    setup_asdf(monkeypatch, asdf_path)
+    monkeypatch.setattr(utils.shutil, "which", lambda name: f"/usr/local/bin/{name}")
+    monkeypatch.setattr(utils.click, "get_app_dir", lambda _: str(tmp_path))
+    monkeypatch.setattr(utils, "time", lambda: now)
+    monkeypatch.setattr(
+        utils, "warn", lambda message, **kwargs: warnings.append(message)
+    )
+    warning_file.parent.mkdir(parents=True, exist_ok=True)
+    warning_file.write_text("")
+    old = now - utils.SHADOWED_KUBECTL_WARNING_SNOOZE_SECONDS - 1
+    os.utime(warning_file, (old, old))
+
+    utils.warn_if_kubectl_is_shadowed()
+
+    assert len(warnings) == 1
+    assert warning_file.stat().st_mtime == now
+
+
+def test_warn_if_kubectl_is_shadowed_can_be_disabled_by_env(monkeypatch, tmp_path):
+    asdf_path = "/Users/test/.asdf/installs/kubectl/1.30.0/bin/kubectl"
+    warnings = []
+    clear_caches()
+    setup_asdf(monkeypatch, asdf_path)
+    monkeypatch.setattr(utils.shutil, "which", lambda name: f"/usr/local/bin/{name}")
+    monkeypatch.setattr(utils.click, "get_app_dir", lambda _: str(tmp_path))
+    monkeypatch.setattr(
+        utils, "warn", lambda message, **kwargs: warnings.append(message)
+    )
+    monkeypatch.setitem(utils.ENV, utils.SHADOWED_KUBECTL_WARNING_ENV, "true")
+
+    utils.warn_if_kubectl_is_shadowed()
+
+    warning_file = tmp_path / utils.SHADOWED_KUBECTL_WARNING_FILE
+    assert warnings == []
+    assert not warning_file.exists()
 
 
 def test_warn_if_kubectl_is_shadowed_accepts_asdf_shim(monkeypatch):
