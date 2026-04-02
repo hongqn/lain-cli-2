@@ -1254,7 +1254,9 @@ def job(
     \b
         # enter an existing job container, similar to `lain x`
         lain job x
+        lain job x bash
         lain job x dummy-5562bd9d33e0c6ce
+        lain job x dummy-5562bd9d33e0c6ce bash
         lain job x dummy-5562bd9d33e0c6ce -- sh -c "ls | grep foo"
         lain job x -- python3 manage.py foo --bar
     \b

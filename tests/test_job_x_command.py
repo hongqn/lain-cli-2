@@ -67,6 +67,42 @@ def test_lain_job_x_uses_zsh_for_lain_jobs(monkeypatch):
     ]
 
 
+def test_lain_job_x_can_select_bash_via_positional_command(monkeypatch):
+    picked = []
+    kubectl_calls = []
+    warnings = []
+
+    def fake_pick_job_pod(appname, job_name=None):
+        picked.append((appname, job_name))
+        if job_name == "bash":
+            return None
+        return "dummy-job-pod"
+
+    def fake_kubectl(*args, **kwargs):
+        kubectl_calls.append((args, kwargs))
+        return CompletedProcess(args=args, returncode=0)
+
+    def fake_warn(message, *args, **kwargs):
+        warnings.append(message)
+
+    monkeypatch.setattr(lain_module, "pick_job_pod", fake_pick_job_pod)
+    monkeypatch.setattr(lain_module, "kubectl", fake_kubectl)
+    monkeypatch.setattr(lain_module, "warn", fake_warn)
+
+    run_cli(monkeypatch, args=["job", "x", "bash"], obj={"appname": APPNAME})
+
+    assert picked == [(APPNAME, "bash"), (APPNAME, None)]
+    assert warnings == [
+        "bash is not a running job name, thus interpreting the command as `['bash']`"
+    ]
+    assert kubectl_calls == [
+        (
+            ("exec", "-it", "dummy-job-pod", "--", "bash"),
+            {"check": False, "timeout": None},
+        )
+    ]
+
+
 def test_lain_job_x_accepts_job_name_before_command(monkeypatch):
     picked = []
     kubectl_calls = []
