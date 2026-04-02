@@ -13,6 +13,7 @@ from typing import Any, cast
 import click
 import requests
 from click import BadParameter
+from click.core import ParameterSource
 from humanfriendly import InvalidTimespan, parse_size, parse_timespan
 from jinja2 import Template
 from packaging import version as packaging_version
@@ -955,53 +956,61 @@ def logs(
                 too_much_logs_headsup()
 
 
-@lain.command()
-@click.option(
-    "--image-tag", help="specify image tag, default to currently deployed image"
+JOB_CREATION_OPTION_NAMES = (
+    "image_tag",
+    "head",
+    "wait",
+    "timeout",
+    "memory",
+    "user",
+    "force",
+    "interactive",
+    "context",
+    "deploy",
 )
-@click.option(
-    "--head",
-    is_flag=True,
-    help="use current git HEAD as imageTag",
-)
-@click.option("--wait", is_flag=True, help="wait until job exits")
-@click.option(
-    "--timeout",
-    default=3600,
-    callback=click_parse_timespan,
-    help="timeout default to 1h",
-)
-@click.option(
-    "--memory",
-    default="8Gi",
-    help="memory limits default to 8Gi",
-)
-@click.option(
-    "--user",
-    "-u",
-    type=int,
-    help="override user id (for example, root is 0), which defaults to the docker image user",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    help="if a job with a same command exists, delete it before proceed",
-)
-@click.option(
-    "--interactive",
-    "-i",
-    is_flag=True,
-    help="start a container that sleeps for --timeout, and run your command in a interactive session",
-)
-@click.option("--context", is_flag=True, help="copy all files under $CWD to container")
-@click.option(
-    "--deploy",
-    default=None,
-    help="specify which deployment to use as job template, default to the first defined deployment",
-)
-@click.argument("command", nargs=-1)
-@click.pass_context
-def job(
+
+
+def pick_job_pod(appname: str, job_name: str | None = None) -> str | None:
+    selector_parts = [f"app.kubernetes.io/name={appname}"]
+    if job_name:
+        selector_parts.append(f"job-name={job_name}")
+    else:
+        selector_parts.append("job-name")
+    selector = ",".join(selector_parts)
+    return pick_pod(phase="Running", selector=selector)
+
+
+def enter_job_container(
+    ctx: click.Context, job_name_and_command: tuple[str, ...]
+) -> None:
+    appname = ctx.obj.get("appname")
+    if not appname:
+        warn('not in a lain app repo, interpreting job name as "lain"')
+        appname = ctx.obj["appname"] = "lain"
+
+    if job_name_and_command:
+        job_name, *cmd = job_name_and_command
+        pod_name = pick_job_pod(appname, job_name=job_name)
+        if not pod_name:
+            cmd = list(job_name_and_command)
+            warn(
+                f"{job_name} is not a running job name, thus interpreting the command as `{cmd}`"
+            )
+            pod_name = pick_job_pod(appname)
+    else:
+        cmd = []
+        pod_name = pick_job_pod(appname)
+
+    if not pod_name:
+        error(f"no running job pod found for app {appname}", exit=1)
+        return
+
+    cmd = cmd or ["bash"]
+    res = kubectl("exec", "-it", pod_name, "--", *cmd, check=False, timeout=None)
+    ctx.exit(rc(res))
+
+
+def run_job_command(
     ctx: click.Context,
     image_tag: str | None,
     head: bool,
@@ -1015,23 +1024,6 @@ def job(
     deploy: str | None,
     command: tuple[str, ...],
 ) -> None:
-    """creates a Kubernetes Job to run desired command.
-
-    \b
-    examples:
-    \b
-        # use -- to avoid click confusion on cli options
-        lain job -- echo me so tired
-        # omit command to run interactive shell, this implies --wait
-        lain job
-    \b
-        # when CWD is a lain app, will start a container using the same environment (same image, same env / secrets)
-        lain job -- ./manage.py migrate
-    \b
-        # when CWD isn't a lain app, the job will use the lain image instead, lain image is "battery included"
-        lain job -i -- mysql -hmysql -uroot -pxxx
-    \b
-    """
     if image_tag and head:
         raise BadParameter("cannot use --image-tag with --head")
     isatty = sys.stdout.isatty()
@@ -1181,6 +1173,119 @@ def job(
             echo("created a container to sleep 1h, you must finish your work within")
             kubectl("exec", "-it", pod_name, "--", sh, timeout=None)
             kubectl("delete", "job", job_name)
+
+
+@lain.command()
+@click.option(
+    "--image-tag", help="specify image tag, default to currently deployed image"
+)
+@click.option(
+    "--head",
+    is_flag=True,
+    help="use current git HEAD as imageTag",
+)
+@click.option("--wait", is_flag=True, help="wait until job exits")
+@click.option(
+    "--timeout",
+    default=3600,
+    callback=click_parse_timespan,
+    help="timeout default to 1h",
+)
+@click.option(
+    "--memory",
+    default="8Gi",
+    help="memory limits default to 8Gi",
+)
+@click.option(
+    "--user",
+    "-u",
+    type=int,
+    help="override user id (for example, root is 0), which defaults to the docker image user",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="if a job with a same command exists, delete it before proceed",
+)
+@click.option(
+    "--interactive",
+    "-i",
+    is_flag=True,
+    help="start a container that sleeps for --timeout, and run your command in a interactive session",
+)
+@click.option("--context", is_flag=True, help="copy all files under $CWD to container")
+@click.option(
+    "--deploy",
+    default=None,
+    help="specify which deployment to use as job template, default to the first defined deployment",
+)
+@click.argument("command", nargs=-1)
+@click.pass_context
+def job(
+    ctx: click.Context,
+    image_tag: str | None,
+    head: bool,
+    wait: bool,
+    timeout: int,
+    memory: str,
+    user: int | None,
+    force: bool,
+    interactive: bool,
+    context: bool,
+    deploy: str | None,
+    command: tuple[str, ...],
+) -> None:
+    """creates a Kubernetes Job to run desired command.
+
+    \b
+    examples:
+    \b
+        # use -- to avoid click confusion on cli options
+        lain job -- echo me so tired
+        # omit command to run interactive shell, this implies --wait
+        lain job
+    \b
+        # when CWD is a lain app, will start a container using the same environment (same image, same env / secrets)
+        lain job -- ./manage.py migrate
+    \b
+        # when CWD isn't a lain app, the job will use the lain image instead, lain image is "battery included"
+        lain job -i -- mysql -hmysql -uroot -pxxx
+    \b
+        # enter an existing job container, similar to `lain x`
+        lain job x
+        lain job x dummy-5562bd9d33e0c6ce
+        lain job x dummy-5562bd9d33e0c6ce -- sh -c "ls | grep foo"
+        lain job x -- python3 manage.py foo --bar
+    \b
+    """
+    if command and command[0] == "x":
+        explicit_options = [
+            f"--{name.replace('_', '-')}"
+            for name in JOB_CREATION_OPTION_NAMES
+            if ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
+        ]
+        if explicit_options:
+            raise BadParameter(
+                "`lain job x` does not accept job creation options: "
+                + ", ".join(explicit_options)
+            )
+        enter_job_container(ctx=ctx, job_name_and_command=command[1:])
+        return
+
+    run_job_command(
+        ctx=ctx,
+        image_tag=image_tag,
+        head=head,
+        wait=wait,
+        timeout=timeout,
+        memory=memory,
+        user=user,
+        force=force,
+        interactive=interactive,
+        context=context,
+        deploy=deploy,
+        command=command,
+    )
 
 
 @lain.command()
