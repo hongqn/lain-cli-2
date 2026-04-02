@@ -3,12 +3,13 @@
 快速上手
 ========
 
-lain 需要调用 kubectl, docker, helm, stern (可选). 这些工具都需要你自行安装. 如果你不清楚要安装什么版本, 那就统一安装最新版吧! lain 最喜欢新版了. 当然啦, kubectl 还是要和 server version 匹配才行, 如果你的团队面对多个版本的 Kubernetes 集群, 推荐你用 `asdf <https://github.com/asdf-vm/asdf>`_ 来管理多版本 kubectl. lain 也与 asdf 进行了整合, 会自动调用切换版本的流程.
+lain 需要调用 kubectl, docker, helm, stern (可选). 这些工具都需要你自行安装. 如果你不清楚要安装什么版本, 那就统一安装最新版吧! lain 最喜欢新版了. 当然啦, kubectl 还是要和 server version 匹配才行, 如果你的团队面对多个版本的 Kubernetes 集群, 推荐你用 `asdf <https://github.com/asdf-vm/asdf>`_ 来管理多版本 kubectl. lain 也与 asdf 进行了整合, 会自动调用切换版本的流程, 并在内部优先使用 asdf 选中的 kubectl.
 
 提前准备
 --------
 
 * 安装了 docker 以后, 你还需要进行 :code:`docker login`, 登录对应集群的 registry.
+* 如果你用 asdf 管理 kubectl, 建议保证 :code:`~/.asdf/shims` 在 :code:`PATH` 里优先于其他 kubectl 所在目录. 否则你手工执行的 kubectl 可能仍会命中旧二进制, 和 lain 内部实际使用的 kubectl 不一致. 排查时可以依次执行 :code:`which kubectl`, :code:`asdf current kubectl`, :code:`asdf which kubectl`.
 
 Windows
 ^^^^^^^

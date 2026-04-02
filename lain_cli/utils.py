@@ -1709,11 +1709,76 @@ def asdf_global(bin, v):
         else:
             error(f"weird asdf error: {stderr}", exit=code)
 
+    clear_kubectl_caches()
     if not kubectl_version_challenge(autofix=False):
         cmd_str = " ".join(cmd)
         error(f"kubectl version still do not match after asdf {cmd_str}")
-        bad_bin = shutil.which("kubectl")
-        error(f"you should probably delete {bad_bin}, let asdf manage for you", exit=1)
+        asdf_kubectl = asdf_which("kubectl")
+        shell_kubectl = shutil.which("kubectl")
+        if asdf_kubectl and shell_kubectl:
+            expected_shim = tell_asdf_shim("kubectl", asdf_kubectl)
+            if shell_kubectl not in {asdf_kubectl, expected_shim}:
+                error(
+                    f"shell kubectl still resolves to {shell_kubectl}, while asdf selected {asdf_kubectl}"
+                )
+                error(
+                    f"put {dirname(expected_shim)} earlier in PATH, or remove the shadowing kubectl",
+                    exit=1,
+                )
+        error("make sure asdf can resolve kubectl correctly, then rerun lain", exit=1)
+
+
+@lru_cache(maxsize=None)
+def asdf_which(bin: str) -> str | None:
+    if not has_asdf():
+        return None
+    res = asdf("which", bin, check=False, capture_output=True)
+    if rc(res):
+        return None
+    path = ensure_str(res.stdout).strip()
+    if not path or not isfile(path):
+        return None
+    return path
+
+
+def tell_asdf_shim(bin: str, resolved_bin: str) -> str:
+    install_marker = f"{os.sep}installs{os.sep}"
+    asdf_root, marker, _ = resolved_bin.partition(install_marker)
+    if marker:
+        return join(asdf_root, "shims", bin)
+    asdf_data_dir = expanduser(ENV.get("ASDF_DATA_DIR") or "~/.asdf")
+    return join(asdf_data_dir, "shims", bin)
+
+
+@lru_cache(maxsize=None)
+def tell_kubectl_binary() -> str:
+    if kubectl_bin := asdf_which("kubectl"):
+        return kubectl_bin
+    if kubectl_bin := shutil.which("kubectl"):
+        return kubectl_bin
+    raise FileNotFoundError("kubectl")
+
+
+@lru_cache(maxsize=None)
+def warn_if_kubectl_is_shadowed():
+    asdf_kubectl = asdf_which("kubectl")
+    if not asdf_kubectl:
+        return
+    shell_kubectl = shutil.which("kubectl")
+    if not shell_kubectl:
+        return
+    expected_shim = tell_asdf_shim("kubectl", asdf_kubectl)
+    if shell_kubectl not in {asdf_kubectl, expected_shim}:
+        warn(
+            f"shell kubectl resolves to {shell_kubectl}, while asdf selected {asdf_kubectl}; lain will use the asdf-managed kubectl. put {dirname(expected_shim)} earlier in PATH if you want manual kubectl to match"
+        )
+
+
+def clear_kubectl_caches():
+    asdf_which.cache_clear()
+    tell_kubectl_binary.cache_clear()
+    warn_if_kubectl_is_shadowed.cache_clear()
+    kubectl_version_challenge.cache_clear()
 
 
 def git(
@@ -1797,8 +1862,9 @@ def fix_kubectl(cv=None, sv=None):
 @lru_cache(maxsize=None)
 def kubectl_version_challenge(check=True, autofix=True):
     try:
+        kubectl_binary = tell_kubectl_binary()
         res = subprocess_run(
-            ["kubectl", "version"],
+            [kubectl_binary, "version"],
             capture_output=True,
             env=ENV,
             silent=True,
@@ -1870,7 +1936,9 @@ def kubectl(
     **kwargs: Any,
 ) -> CompletedProcessBytes | None:
     kubectl_version_challenge(check=check)
-    cmd = ["kubectl", *args]
+    warn_if_kubectl_is_shadowed()
+    kubectl_binary = tell_kubectl_binary()
+    cmd = [kubectl_binary, *args]
     kwargs.setdefault("timeout", 20)
     completed = subprocess_run(cmd, env=ENV, check=check, dry_run=dry_run, **kwargs)
     if exit:
