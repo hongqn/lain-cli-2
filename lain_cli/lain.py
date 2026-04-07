@@ -682,33 +682,18 @@ def lint(ctx, simple):
     builds = tell_builds()
     if builds:
         build_names = set(builds.keys())
-        # check deployment build references
-        for proc_name, proc in values.get("deployments", {}).items():
-            ref = proc.get("build")
-            if ref and ref not in build_names:
-                error(
-                    f"deployment {proc_name} references build '{ref}' which is not defined in builds",
-                    exit=True,
-                )
-        # check cronjob build references
-        for cron_name, cron in values.get("cronjobs", {}).items():
-            ref = cron.get("build")
-            if ref and ref not in build_names:
-                error(
-                    f"cronjob {cron_name} references build '{ref}' which is not defined in builds",
-                    exit=True,
-                )
-        # check statefulSet build references
-        for sts_name, sts in values.get("statefulSets", {}).items():
-            ref = sts.get("build")
-            if ref and ref not in build_names:
-                error(
-                    f"statefulSet {sts_name} references build '{ref}' which is not defined in builds",
-                    exit=True,
-                )
+        # check build references across all workload types
+        for section in ("deployments", "cronjobs", "statefulSets", "jobs"):
+            for name, workload in values.get(section, {}).items():
+                ref = workload.get("build")
+                if ref and ref not in build_names:
+                    error(
+                        f"{section[:-1]} {name} references build '{ref}' which is not defined in builds",
+                        exit=True,
+                    )
         # warn if multi-build but no default and some workloads lack build field
         if len(builds) > 1 and DEFAULT_BUILD_NAME not in build_names:
-            for section in ("deployments", "cronjobs", "statefulSets"):
+            for section in ("deployments", "cronjobs", "statefulSets", "jobs"):
                 for proc_name, proc in values.get(section, {}).items():
                     if (
                         not proc.get("build")
