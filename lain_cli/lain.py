@@ -706,17 +706,18 @@ def lint(ctx, simple):
                     f"statefulSet {sts_name} references build '{ref}' which is not defined in builds",
                     exit=True,
                 )
-        # warn if multi-build but no default and some deployments lack build field
+        # warn if multi-build but no default and some workloads lack build field
         if len(builds) > 1 and DEFAULT_BUILD_NAME not in build_names:
-            for proc_name, proc in values.get("deployments", {}).items():
-                if (
-                    not proc.get("build")
-                    and not proc.get("image")
-                    and not proc.get("imageTag")
-                ):
-                    warn(
-                        f"deployment {proc_name} has no 'build' field and no 'default' build exists; it will use chart.image"
-                    )
+            for section in ("deployments", "cronjobs", "statefulSets"):
+                for proc_name, proc in values.get(section, {}).items():
+                    if (
+                        not proc.get("build")
+                        and not proc.get("image")
+                        and not proc.get("imageTag")
+                    ):
+                        warn(
+                            f"{section[:-1]} {proc_name} has no 'build' field and no 'default' build exists; it will use chart.image"
+                        )
 
     if simple:
         ctx.exit(0)
@@ -2200,6 +2201,11 @@ def build(ctx, push, deploy, publish, keep_dockerfile, build_name):
 
     names_to_build = [build_name] if build_name else list(builds.keys())
     for name in names_to_build:
+        if name not in builds:
+            error(
+                f"build '{name}' not found in builds config, available: {', '.join(builds.keys())}",
+                exit=1,
+            )
         build_clause = builds[name]
         try_lain_prepare(keep_dockerfile=keep_dockerfile, build_name=name)
         stage = "release" if "release" in build_clause else "build"
