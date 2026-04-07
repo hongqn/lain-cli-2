@@ -68,6 +68,8 @@ spec:
           image: {{ $initJob.image }}
           {{- else if hasKey $initJob "imageTag" }}
           image: {{ include "chart.registry" $ }}/{{ printf "%s:%s" $.Values.appname $initJob.imageTag }}
+          {{- else if hasKey $initJob "build" }}
+          image: {{ include "chart.buildImage" (dict "root" $ "buildName" $initJob.build) }}
           {{- else }}
           image: {{ include "chart.image" $ }}
           {{- end }}
@@ -122,6 +124,8 @@ spec:
           image: {{ $deployment.image }}
           {{- else if hasKey $deployment "imageTag" }}
           image: {{ include "chart.registry" $ }}/{{ printf "%s:%s" $.Values.appname $deployment.imageTag }}
+          {{- else if hasKey $deployment "build" }}
+          image: {{ include "chart.buildImage" (dict "root" $ "buildName" $deployment.build) }}
           {{- else }}
           image: {{ include "chart.image" $ }}
           {{- end }}

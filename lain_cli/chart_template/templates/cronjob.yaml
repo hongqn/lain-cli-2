@@ -114,6 +114,8 @@ spec:
               image: {{ $cronjob.image }}
               {{- else if hasKey $cronjob "imageTag" }}
               image: {{ include "chart.registry" $ }}/{{ printf "%s:%s" $.Values.appname $cronjob.imageTag }}
+              {{- else if hasKey $cronjob "build" }}
+              image: {{ include "chart.buildImage" (dict "root" $ "buildName" $cronjob.build) }}
               {{- else }}
               image: {{ include "chart.image" $ }}
               {{- end }}
