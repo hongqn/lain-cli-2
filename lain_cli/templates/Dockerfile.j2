@@ -1,55 +1,57 @@
-{% if values.build.prepare and current_build_stage == 'prepare' %}
-FROM {{ values.build.base }} AS prepare
-WORKDIR {{ values.build.workdir }}
-ADD --chown=1001:1001 . {{ values.build.workdir }}
+{% set bc = build_clause | default(values.build) %}
+{% if bc.prepare and current_build_stage == 'prepare' %}
+FROM {{ bc.base }} AS prepare
+WORKDIR {{ bc.workdir }}
+ADD --chown=1001:1001 . {{ bc.workdir }}
 
-{% if values.build.prepare.env %}
-ENV {% for k, v in values.build.prepare.env.items() %}{{ k }}={{ v | to_json }} {% endfor %}
+{% if bc.prepare.env %}
+ENV {% for k, v in bc.prepare.env.items() %}{{ k }}={{ v | to_json }} {% endfor %}
 {% endif %}
 
-{% for l in values.build.prepare.script %}
+{% for l in bc.prepare.script %}
 RUN {{ l }}
 {% endfor %}
 
-RUN find . -type f {% if values.build.prepare.keep %}{% for k in values.build.prepare.keep %}{% if not loop.first %} -and {% endif %} -not -path '{{ k }}' -and -not -path '{{ k }}/*' {% endfor %}{% endif %} -delete
+RUN find . -type f {% if bc.prepare.keep %}{% for k in bc.prepare.keep %}{% if not loop.first %} -and {% endif %} -not -path '{{ k }}' -and -not -path '{{ k }}/*' {% endfor %}{% endif %} -delete
 {% endif %}
 
-{% if values.build.prepare %}
-FROM {{ cluster_config.registry }}/{{ appname }}:prepare AS build
+{% set release = bc.release | default(values.release | default(None)) %}
+{% if bc.prepare %}
+FROM {{ cluster_config.registry }}/{{ build_image_repo }}:prepare AS build
 {% else %}
-FROM {{ values.build.base }} AS build
+FROM {{ bc.base }} AS build
 {% endif %}
-WORKDIR {{ values.build.workdir }}
-{% if values.build.env %}
-ENV {% for k, v in values.build.env.items() %}{{ k }}={{ v | to_json }} {% endfor %}
+WORKDIR {{ bc.workdir }}
+{% if bc.env %}
+ENV {% for k, v in bc.env.items() %}{{ k }}={{ v | to_json }} {% endfor %}
 {% endif %}
 
 {% if lain_meta %}
 ENV LAIN_META={{ lain_meta }}
 {% endif %}
 
-ADD --chown=1001:1001 . {{ values.build.workdir }}
-{% if values.build.script %}
-RUN ({{ ') && ('.join(values.build.script) }})
+ADD --chown=1001:1001 . {{ bc.workdir }}
+{% if bc.script %}
+RUN ({{ ') && ('.join(bc.script) }})
 {% endif %}
 
-{% if values.release %}
-FROM {{ values.release.dest_base }} AS release
-WORKDIR {{ values.release.workdir }}
+{% if release %}
+FROM {{ release.dest_base }} AS release
+WORKDIR {{ release.workdir }}
 {% if lain_meta %}
 ENV LAIN_META={{ lain_meta }}
 {% endif %}
 
-{% for copy in values.release['copy'] %}
+{% for copy in release['copy'] %}
 COPY --chown=1001:1001 --from=build {{ copy.src }} {{ copy.dest }}
 {% endfor %}
 
-{% if values.release.env %}
-ENV {% for k, v in values.release.env.items() %}{{ k }}={{ v | to_json }} {% endfor %}
+{% if release.env %}
+ENV {% for k, v in release.env.items() %}{{ k }}={{ v | to_json }} {% endfor %}
 {% endif %}
 
-{% if values.release.script %}
-RUN ({{ ') && ('.join(values.release.script) }})
+{% if release.script %}
+RUN ({{ ') && ('.join(release.script) }})
 {% endif %}
 {% endif %}
 
