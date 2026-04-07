@@ -2424,8 +2424,8 @@ def push(ctx, images, pull, overwrite_latest, registry, build_name):
         ctx.exit(0)
 
     builds = tell_builds()
-    if builds and not build_name and len(builds) > 1:
-        # Multi-build: push all builds
+    if builds and not build_name:
+        # Push all builds (works for both single and multi-build)
         for name in builds:
             image = tell_image(build_name=name)
             if not image:
