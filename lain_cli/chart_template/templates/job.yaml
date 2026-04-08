@@ -95,6 +95,8 @@ spec:
           image: {{ $job.image }}
           {{- else if hasKey $job "imageTag" }}
           image: {{ include "chart.registry" $ }}/{{ printf "%s:%s" $.Values.appname $job.imageTag }}
+          {{- else if hasKey $job "build" }}
+          image: {{ include "chart.buildImage" (dict "root" $ "buildName" $job.build) }}
           {{- else }}
           image: {{ include "chart.image" $ }}
           {{- end }}

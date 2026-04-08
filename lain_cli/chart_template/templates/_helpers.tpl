@@ -5,6 +5,15 @@
 {{- printf "%s/%s:%s" $reg .Values.appname .Values.imageTag}}
 {{- end -}}
 
+{{- define "chart.buildImage" -}}
+{{- $reg := default .root.Values.registry .root.Values.internalRegistry -}}
+{{- if eq .buildName "default" -}}
+{{- printf "%s/%s:%s" $reg .root.Values.appname .root.Values.imageTag -}}
+{{- else -}}
+{{- printf "%s/%s-%s:%s" $reg .root.Values.appname .buildName .root.Values.imageTag -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "chart.registry" -}}
 {{ default .Values.registry .Values.internalRegistry }}
 {{- end -}}

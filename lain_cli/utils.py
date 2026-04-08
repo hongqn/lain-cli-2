@@ -97,6 +97,7 @@ DOCKERFILE_NAME = "Dockerfile"
 DOCKERIGNORE_NAME = ".dockerignore"
 GITIGNORE_NAME = ".gitignore"
 BUILD_STAGES = {"prepare", "build", "release"}
+DEFAULT_BUILD_NAME = "default"
 PROTECTED_REPO_KEYWORDS = ("centos",)
 RECENT_TAGS_COUNT = 10
 BIG_DEPLOY_REPLICA_COUNT = 3
@@ -1104,7 +1105,121 @@ def delete_canary_values():
     ensure_absent(canary_values_file)
 
 
-def tell_image_tag(image_tag=None):
+def tell_builds():
+    """Normalize build config into a dict of {name: build_clause}.
+    Supports both singular `build:` and plural `builds:`.
+    In old format, merges top-level `release:` into the build clause.
+    Returns empty dict if neither is defined.
+
+    >>> tell_builds.__doc__ is not None
+    True
+    """
+    ctx = context()
+    values = ctx.obj["values"]
+    has_build = "build" in values
+    has_builds = "builds" in values
+    if has_build and has_builds:
+        error("cannot define both 'build' and 'builds' in values.yaml", exit=1)
+    if has_builds:
+        return dict(values["builds"])
+    if has_build:
+        build_clause = dict(values["build"])
+        # In old format, release: is top-level; merge it into build clause
+        if "release" in values:
+            build_clause["release"] = values["release"]
+        return {DEFAULT_BUILD_NAME: build_clause}
+    return {}
+
+
+def tell_build_order(builds):
+    """Return build names in topological order based on `from:` dependencies.
+    Builds with `from:` must be built after the build they depend on.
+    Detects circular references.
+
+    >>> tell_build_order({"a": {}, "b": {"from": "a"}, "c": {}})
+    ['a', 'c', 'b']
+    >>> tell_build_order({"x": {}, "y": {}})
+    ['x', 'y']
+    """
+    # Build adjacency: child -> parent
+    deps = {}
+    for name, clause in builds.items():
+        parent = clause.get("from")
+        if parent:
+            deps[name] = parent
+
+    # Detect cycles
+    for name in deps:
+        chain = []
+        current = name
+        seen = set()
+        while current in deps:
+            if current in seen:
+                error(
+                    f"circular 'from' dependency detected: {' -> '.join(chain)} -> {current}",
+                )
+                raise SystemExit(1)
+            seen.add(current)
+            chain.append(current)
+            current = deps[current]
+
+    # Topological sort via Kahn's algorithm
+    in_degree = {name: 0 for name in builds}
+    children = {name: [] for name in builds}
+    for child, parent in deps.items():
+        in_degree[child] += 1
+        if parent in children:
+            children[parent].append(child)
+
+    queue = [name for name in builds if in_degree[name] == 0]
+    result = []
+    while queue:
+        node = queue.pop(0)
+        result.append(node)
+        for child in children.get(node, []):
+            in_degree[child] -= 1
+            if in_degree[child] == 0:
+                queue.append(child)
+
+    return result
+
+
+def tell_build_deps(builds, build_name):
+    """Return ordered list of builds that must be built before build_name (inclusive).
+    Follows `from:` chain upward.  Detects circular references.
+
+    >>> tell_build_deps({"a": {}, "b": {"from": "a"}, "c": {"from": "b"}}, "c")
+    ['a', 'b', 'c']
+    >>> tell_build_deps({"a": {}, "b": {}}, "b")
+    ['b']
+    """
+    chain = []
+    seen = set()
+    current = build_name
+    while current:
+        if current in seen:
+            error(
+                f"circular 'from' dependency detected: {' -> '.join(chain)} -> {current}",
+            )
+            raise SystemExit(1)
+        seen.add(current)
+        chain.append(current)
+        current = builds.get(current, {}).get("from")
+    chain.reverse()
+    return chain
+
+
+def tell_image_repo(build_name=None):
+    """Return the image repository name for a given build.
+    'default' or None returns appname; others return appname-{build_name}."""
+    ctx = context()
+    appname = ctx.obj["appname"]
+    if not build_name or build_name == DEFAULT_BUILD_NAME:
+        return appname
+    return f"{appname}-{build_name}"
+
+
+def tell_image_tag(image_tag=None, build_name=None):
     """really smart method to figure out which image_tag is the right one to deploy:
     1. if image_tag isn't provided, obtain from lain_meta
     2. check for existence against registry API
@@ -1113,7 +1228,7 @@ def tell_image_tag(image_tag=None):
     """
     ctx = context()
     values = ctx.obj["values"]
-    use_lain_build = "build" in values
+    use_lain_build = "build" in values or "builds" in values
     if not use_lain_build:
         # 如果压根不用 lain build, 那么也无法通过查询 registry 来推断镜像 tag
         return image_tag
@@ -1124,13 +1239,16 @@ def tell_image_tag(image_tag=None):
     registry = tell_registry_client()
     if not registry or ctx.obj.get("ignore_lint"):
         return image_tag
-    appname = ctx.obj["appname"]
-    existing_tags = registry.list_tags(appname) or []
+    repo_name = tell_image_repo(build_name)
+    existing_tags = registry.list_tags(repo_name) or []
     if image_tag not in existing_tags:
         # when using lain deploy --build without using --set imageTag=xxx, we
         # can build the requested image for the user
         if ctx.obj.get("build_jit") and build_jit_challenge(image_tag):
-            lain_("build", "--push")
+            build_args = ["build", "--push"]
+            if build_name:
+                build_args.extend(["--name", build_name])
+            lain_(*build_args)
             return image_tag
 
         recent_tags = RegistryUtils.sort_and_filter(existing_tags)[:RECENT_TAGS_COUNT]
@@ -1145,7 +1263,7 @@ def tell_image_tag(image_tag=None):
         else:
             amender = f"lain deploy --set imageTag={latest_tag}"
 
-        image = make_image_str(image_tag=image_tag)
+        image = make_image_str(image_tag=image_tag, build_name=build_name)
         err = f"""
         Image not found: {image}.
         Did you forget to lain push? Try fix with lain deploy --build
@@ -1186,12 +1304,12 @@ def lain_(
     return completed
 
 
-def lain_image(stage="release"):
+def lain_image(stage="release", build_name=None):
     if stage == "prepare":
-        return make_image_str(image_tag="prepare")
+        return make_image_str(image_tag="prepare", build_name=build_name)
     if stage in BUILD_STAGES:
         image_tag = lain_meta()
-        return make_image_str(image_tag=image_tag)
+        return make_image_str(image_tag=image_tag, build_name=build_name)
     raise ValueError(f"weird stage {stage}, choose from {BUILD_STAGES}")
 
 
@@ -2887,24 +3005,42 @@ def change_dir(d):
         os.chdir(saved_dir)
 
 
-def try_lain_prepare(keep_dockerfile=False):
+def try_lain_prepare(keep_dockerfile=False, build_name=None):
     """想尽办法拿到 prepare 镜像, 先 pull, 没有的话看本地,
     本地有的话还要顺手搬运过去"""
-    ctx = context()
-    values = ctx.obj["values"]
-    build_clause = values["build"]
+    builds = tell_builds()
+    if not builds:
+        return
+    if build_name:
+        build_clause = builds.get(build_name, {})
+    else:
+        build_clause = next(iter(builds.values()), {})
+
+    # If this build uses `from:`, it has no prepare of its own
+    if build_clause.get("from"):
+        return
+
     prepare_clause = build_clause.get("prepare")
+
+    # prepare: <string> means share another build's prepare image
+    if isinstance(prepare_clause, str):
+        # The referenced build's prepare should already be built;
+        # we just need to ensure it's available locally
+        ref_build_name = prepare_clause
+        try_lain_prepare(keep_dockerfile=keep_dockerfile, build_name=ref_build_name)
+        return
+
     if not prepare_clause:
         return
 
-    appname = ctx.obj["appname"]
+    repo_name = tell_image_repo(build_name)
     local_prepare_image = ""
     for image_info in docker_images():
-        if image_info["appname"] == appname and image_info["tag"] == "prepare":
+        if image_info["appname"] == repo_name and image_info["tag"] == "prepare":
             local_prepare_image = image_info["image"]
             break
 
-    prepare_image = lain_image(stage="prepare")
+    prepare_image = lain_image(stage="prepare", build_name=build_name)
     res = docker("pull", prepare_image, capture_error=True, check=False)
     returncode = rc(res)
     if returncode:
@@ -2916,7 +3052,12 @@ def try_lain_prepare(keep_dockerfile=False):
                 )
                 banyun(local_prepare_image)
             else:
-                lain_build(stage="prepare", push=True, keep_dockerfile=keep_dockerfile)
+                lain_build(
+                    stage="prepare",
+                    push=True,
+                    keep_dockerfile=keep_dockerfile,
+                    build_name=build_name,
+                )
         else:
             error(stderr, exit=returncode)
 
@@ -2954,20 +3095,45 @@ def make_docker_ignore():
         f.write(template.render(git_ignores=converted))
 
 
-def lain_build(stage="build", push=True, keep_dockerfile=False):
+def lain_build(stage="build", push=True, keep_dockerfile=False, build_name=None):
     ctx = context()
     ctx.obj["current_build_stage"] = stage
-    values = ctx.obj["values"]
-    if "build" not in values:
+    builds = tell_builds()
+    if not builds:
         warn("build not defined in {CHART_DIR_NAME}/values.yaml", exit=0)
 
-    build_clause = values["build"]
+    if build_name:
+        if build_name not in builds:
+            error(f"build '{build_name}' not found in builds config", exit=1)
+        build_clause = builds[build_name]
+    else:
+        build_clause = next(iter(builds.values()))
+        build_name = next(iter(builds.keys()))
+
+    # Inject build_clause and image repo into context for Dockerfile.j2 template
+    ctx.obj["build_clause"] = build_clause
+    ctx.obj["build_image_repo"] = tell_image_repo(build_name)
+
+    # Handle `from:` — use parent build's image as base
+    from_build = build_clause.get("from")
+    if from_build:
+        ctx.obj["from_build_image"] = make_image_str(build_name=from_build)
+    else:
+        ctx.obj["from_build_image"] = None
+
+    # Handle `prepare: <string>` — use referenced build's prepare image
+    prepare_clause = build_clause.get("prepare")
+    if isinstance(prepare_clause, str):
+        ref_build_name = prepare_clause
+        ctx.obj["shared_prepare_repo"] = tell_image_repo(ref_build_name)
+    else:
+        ctx.obj["shared_prepare_repo"] = None
     prepare_clause = build_clause.get("prepare")
     if stage == "prepare" and not prepare_clause:
         build_yaml = yadu(build_clause)
         warn(f"empty prepare clause:\n\n{build_yaml}", exit=0)
 
-    image = lain_image(stage)
+    image = lain_image(stage, build_name=build_name)
     template = template_env.get_template(f"{DOCKERFILE_NAME}.j2")
     if isfile(DOCKERFILE_NAME):
         error(
@@ -3027,7 +3193,7 @@ def make_wildcard_domain(d):
     return [with_star, without_star]
 
 
-def make_image_str(registry=None, appname=None, image_tag=None):
+def make_image_str(registry=None, appname=None, image_tag=None, build_name=None):
     if not registry:
         cc = tell_cluster_config()
         registry = cc["registry"]
@@ -3036,8 +3202,7 @@ def make_image_str(registry=None, appname=None, image_tag=None):
         image_tag = lain_meta()
 
     if not appname:
-        ctx = context()
-        appname = ctx.obj["appname"]
+        appname = tell_image_repo(build_name)
 
     if registry.startswith("docker.io"):
         # omit default registry
@@ -3047,12 +3212,11 @@ def make_image_str(registry=None, appname=None, image_tag=None):
     return image
 
 
-def tell_image():
-    ctx = context()
-    appname = ctx.obj.get("appname")
+def tell_image(build_name=None):
+    repo_name = tell_image_repo(build_name)
     meta = lain_meta()
     for image_info in docker_images():
-        if image_info["appname"] == appname and image_info["tag"] == meta:
+        if image_info["appname"] == repo_name and image_info["tag"] == meta:
             return image_info["image"]
 
 

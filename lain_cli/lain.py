@@ -46,6 +46,7 @@ from lain_cli.utils import (
     CHART_VERSION,
     CLUSTERS,
     DEFAULT_BACKEND_RESPONSE,
+    DEFAULT_BUILD_NAME,
     DOCKER_COMPOSE_FILE_PATH,
     ENV,
     HELM_STUCK_STATE,
@@ -103,6 +104,9 @@ from lain_cli.utils import (
     stern,
     storage_class_can_reattach,
     tell_best_deploy,
+    tell_build_deps,
+    tell_build_order,
+    tell_builds,
     tell_change_from_kubectl_output,
     tell_cherry,
     tell_cluster,
@@ -111,6 +115,7 @@ from lain_cli.utils import (
     tell_grafana_url,
     tell_helm_options,
     tell_image,
+    tell_image_repo,
     tell_image_tag,
     tell_job_timeout,
     tell_kibana_url,
@@ -673,6 +678,71 @@ def lint(ctx, simple):
             f"to fix this, run lain init --template-only --commit, or change {chart_yaml}:version to a larger value, to prove that you don't need the built-in helm chart anymore",
             exit=True,
         )
+
+    # validate builds config
+    values = ctx.obj.get("values", {})
+    builds = tell_builds()
+    if builds:
+        build_names = set(builds.keys())
+        # check build references across all workload types
+        for section in ("deployments", "cronjobs", "statefulSets", "jobs"):
+            for name, workload in values.get(section, {}).items():
+                ref = workload.get("build")
+                if ref and ref not in build_names:
+                    error(
+                        f"{section[:-1]} {name} references build '{ref}' which is not defined in builds",
+                        exit=True,
+                    )
+        # validate from: references
+        for name, clause in builds.items():
+            from_ref = clause.get("from")
+            if from_ref:
+                if from_ref not in build_names:
+                    error(
+                        f"build '{name}' has from: '{from_ref}' which is not defined in builds",
+                        exit=True,
+                    )
+                if clause.get("base"):
+                    error(
+                        f"build '{name}' cannot have both 'from' and 'base'",
+                        exit=True,
+                    )
+                prepare = clause.get("prepare")
+                if isinstance(prepare, dict):
+                    error(
+                        f"build '{name}' cannot have both 'from' and 'prepare' (dict)",
+                        exit=True,
+                    )
+        # validate prepare: <string> references
+        for name, clause in builds.items():
+            prepare = clause.get("prepare")
+            if isinstance(prepare, str):
+                if prepare not in build_names:
+                    error(
+                        f"build '{name}' has prepare: '{prepare}' which is not defined in builds",
+                        exit=True,
+                    )
+                ref_clause = builds[prepare]
+                ref_prepare = ref_clause.get("prepare")
+                if not isinstance(ref_prepare, dict):
+                    error(
+                        f"build '{name}' references prepare from '{prepare}', but '{prepare}' has no prepare definition",
+                        exit=True,
+                    )
+        # detect circular from: references
+        tell_build_order(builds)
+        # warn if multi-build but no default and some workloads lack build field
+        if len(builds) > 1 and DEFAULT_BUILD_NAME not in build_names:
+            for section in ("deployments", "cronjobs", "statefulSets", "jobs"):
+                for proc_name, proc in values.get(section, {}).items():
+                    if (
+                        not proc.get("build")
+                        and not proc.get("image")
+                        and not proc.get("imageTag")
+                    ):
+                        warn(
+                            f"{section[:-1]} {proc_name} has no 'build' field and no 'default' build exists; it will use chart.image"
+                        )
 
     if simple:
         ctx.exit(0)
@@ -2139,17 +2209,45 @@ def prepare(ctx, skip_push, keep_dockerfile):
     is_flag=True,
     help="preserve automatically generated dockerfile",
 )
+@click.option(
+    "--name",
+    "build_name",
+    default=None,
+    help="build only the specified build (for multi-build apps)",
+)
 @click.pass_context
-def build(ctx, push, deploy, publish, keep_dockerfile):
+def build(ctx, push, deploy, publish, keep_dockerfile, build_name):
     """\b
     build docker image for your app.
-    to use lain build, you must define values.build."""
-    try_lain_prepare(keep_dockerfile=keep_dockerfile)
-    values = ctx.obj["values"]
-    stage = "release" if "release" in values else "build"
-    lain_build(stage=stage, push=False, keep_dockerfile=keep_dockerfile)
+    to use lain build, you must define values.build or values.builds."""
+    builds = tell_builds()
+    if not builds:
+        warn("build not defined in {CHART_DIR_NAME}/values.yaml", exit=0)
+
+    if build_name:
+        # When --name is given, auto-include dependency chain
+        names_to_build = tell_build_deps(builds, build_name)
+    else:
+        # Build all in topological order
+        names_to_build = tell_build_order(builds)
+
+    for name in names_to_build:
+        if name not in builds:
+            error(
+                f"build '{name}' not found in builds config, available: {', '.join(builds.keys())}",
+                exit=1,
+            )
+        build_clause = builds[name]
+        try_lain_prepare(keep_dockerfile=keep_dockerfile, build_name=name)
+        stage = "release" if "release" in build_clause else "build"
+        lain_build(
+            stage=stage, push=False, keep_dockerfile=keep_dockerfile, build_name=name
+        )
+
     if push or deploy:
         opts = ["--publish"] if publish else []
+        if build_name:
+            opts.extend(["--name", build_name])
         lain_("push", *opts)
 
     if deploy:
@@ -2328,8 +2426,14 @@ def save(
     "--registry",
     help="destination registry, default to the registry configured for current cluster",
 )
+@click.option(
+    "--name",
+    "build_name",
+    default=None,
+    help="push only the specified build (for multi-build apps)",
+)
 @click.pass_context
-def push(ctx, images, pull, overwrite_latest, registry):
+def push(ctx, images, pull, overwrite_latest, registry, build_name):
     """
     push app image to registry.
 
@@ -2365,12 +2469,30 @@ def push(ctx, images, pull, overwrite_latest, registry):
 
         ctx.exit(0)
 
+    builds = tell_builds()
+    if builds and not build_name:
+        # Push all builds (works for both single and multi-build)
+        for name in builds:
+            image = tell_image(build_name=name)
+            if not image:
+                repo_name = tell_image_repo(name)
+                error(f"image not found for {repo_name}", exit=True)
+            banyun(image, pull=pull, registry=registry, overwrite_latest_tag=True)
+        ctx.exit(0)
+
+    if builds and build_name and build_name not in builds:
+        error(
+            f"build '{build_name}' not found in builds config, available: {', '.join(builds.keys())}",
+            exit=True,
+        )
+
     appname = ctx.obj.get("appname")
     if not appname:
         return
-    image = tell_image()
+    image = tell_image(build_name=build_name)
     if not image:
-        error(f"image not found for {appname}", exit=True)
+        repo_name = tell_image_repo(build_name) if build_name else appname
+        error(f"image not found for {repo_name}", exit=True)
 
     theirs = banyun(image, pull=pull, registry=registry, overwrite_latest_tag=True)
     echo(theirs)

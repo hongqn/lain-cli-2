@@ -122,6 +122,8 @@ spec:
           image: {{ $sts.image }}
           {{- else if hasKey $sts "imageTag" }}
           image: {{ include "chart.registry" $ }}/{{ printf "%s:%s" $.Values.appname $sts.imageTag }}
+          {{- else if hasKey $sts "build" }}
+          image: {{ include "chart.buildImage" (dict "root" $ "buildName" $sts.build) }}
           {{- else }}
           image: {{ include "chart.image" $ }}
           {{- end }}

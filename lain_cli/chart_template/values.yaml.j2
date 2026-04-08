@@ -356,6 +356,31 @@ build:
 #     - src: /path
 #       dest: /another
 
+# # 如果你的应用需要构建多个镜像 (比如 Python 后端 + Node.js 前端), 可以用 builds (复数) 替代 build (单数)
+# # 注意: build 和 builds 不能同时存在
+# builds:
+#   default:           # "default" build 的镜像名不带后缀, 与单 build 模式一致
+#     base: python:3.12
+#     script:
+#       - pip install -r requirements.txt
+#   web:               # 其他 build 的镜像名为 {appname}-{name}:{tag}
+#     base: node:20
+#     script:
+#       - npm ci
+#       - npm run build
+#     release:
+#       dest_base: nginx:alpine
+#       copy:
+#         - src: /lain/app/dist
+#           dest: /usr/share/nginx/html
+# # 在 deployment 中通过 build 字段引用:
+# # deployments:
+# #   api:
+# #     command: [python, -m, app]        # 不写 build → 用 default
+# #   web:
+# #     build: web                         # 引用 builds.web 的镜像
+# #     command: [nginx, -g, "daemon off;"]
+
 # # 如果你是一个敏感应用, 不希望被别的容器访问, 或者你希望限制你的应用做外部访问, 那么可以用 network policy 进行限制
 # # ref: https://kubernetes.io/docs/concepts/services-networking/network-policies/
 # networkPolicy:
