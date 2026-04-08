@@ -1,5 +1,5 @@
 {% set bc = build_clause | default(values.build) %}
-{% if bc.prepare and current_build_stage == 'prepare' %}
+{% if bc.prepare and bc.prepare is mapping and current_build_stage == 'prepare' %}
 FROM {{ bc.base }} AS prepare
 WORKDIR {{ bc.workdir }}
 ADD --chown=1001:1001 . {{ bc.workdir }}
@@ -16,7 +16,11 @@ RUN find . -type f {% if bc.prepare.keep %}{% for k in bc.prepare.keep %}{% if n
 {% endif %}
 
 {% set release = bc.release | default(values.release | default(None)) %}
-{% if bc.prepare %}
+{% if from_build_image %}
+FROM {{ from_build_image }} AS build
+{% elif shared_prepare_repo %}
+FROM {{ cluster_config.registry }}/{{ shared_prepare_repo }}:prepare AS build
+{% elif bc.prepare and bc.prepare is mapping %}
 FROM {{ cluster_config.registry }}/{{ build_image_repo }}:prepare AS build
 {% else %}
 FROM {{ bc.base }} AS build

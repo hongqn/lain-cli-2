@@ -104,6 +104,8 @@ from lain_cli.utils import (
     stern,
     storage_class_can_reattach,
     tell_best_deploy,
+    tell_build_deps,
+    tell_build_order,
     tell_builds,
     tell_change_from_kubectl_output,
     tell_cherry,
@@ -691,6 +693,44 @@ def lint(ctx, simple):
                         f"{section[:-1]} {name} references build '{ref}' which is not defined in builds",
                         exit=True,
                     )
+        # validate from: references
+        for name, clause in builds.items():
+            from_ref = clause.get("from")
+            if from_ref:
+                if from_ref not in build_names:
+                    error(
+                        f"build '{name}' has from: '{from_ref}' which is not defined in builds",
+                        exit=True,
+                    )
+                if clause.get("base"):
+                    error(
+                        f"build '{name}' cannot have both 'from' and 'base'",
+                        exit=True,
+                    )
+                prepare = clause.get("prepare")
+                if isinstance(prepare, dict):
+                    error(
+                        f"build '{name}' cannot have both 'from' and 'prepare' (dict)",
+                        exit=True,
+                    )
+        # validate prepare: <string> references
+        for name, clause in builds.items():
+            prepare = clause.get("prepare")
+            if isinstance(prepare, str):
+                if prepare not in build_names:
+                    error(
+                        f"build '{name}' has prepare: '{prepare}' which is not defined in builds",
+                        exit=True,
+                    )
+                ref_clause = builds[prepare]
+                ref_prepare = ref_clause.get("prepare")
+                if not isinstance(ref_prepare, dict):
+                    error(
+                        f"build '{name}' references prepare from '{prepare}', but '{prepare}' has no prepare definition",
+                        exit=True,
+                    )
+        # detect circular from: references
+        tell_build_order(builds)
         # warn if multi-build but no default and some workloads lack build field
         if len(builds) > 1 and DEFAULT_BUILD_NAME not in build_names:
             for section in ("deployments", "cronjobs", "statefulSets", "jobs"):
@@ -2184,7 +2224,13 @@ def build(ctx, push, deploy, publish, keep_dockerfile, build_name):
     if not builds:
         warn("build not defined in {CHART_DIR_NAME}/values.yaml", exit=0)
 
-    names_to_build = [build_name] if build_name else list(builds.keys())
+    if build_name:
+        # When --name is given, auto-include dependency chain
+        names_to_build = tell_build_deps(builds, build_name)
+    else:
+        # Build all in topological order
+        names_to_build = tell_build_order(builds)
+
     for name in names_to_build:
         if name not in builds:
             error(
@@ -2433,6 +2479,12 @@ def push(ctx, images, pull, overwrite_latest, registry, build_name):
                 error(f"image not found for {repo_name}", exit=True)
             banyun(image, pull=pull, registry=registry, overwrite_latest_tag=True)
         ctx.exit(0)
+
+    if builds and build_name and build_name not in builds:
+        error(
+            f"build '{build_name}' not found in builds config, available: {', '.join(builds.keys())}",
+            exit=True,
+        )
 
     appname = ctx.obj.get("appname")
     if not appname:
