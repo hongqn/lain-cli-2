@@ -330,7 +330,7 @@ def test_build_name_valid_with_old_format():
     """lain build --name default should be accepted when using old build: format."""
     # We can't actually docker-build without a daemon, but we can check that
     # it gets past validation (will fail at docker step, not at name validation)
-    res = run(lain, args=["build", "--name", "default"], returncode=None)
+    res = run(lain, args=["build", "--name", "default"], returncode=None)  # pyright: ignore[reportArgumentType]
     assert "not found" not in res.output
 
 
@@ -646,3 +646,35 @@ def test_template_prepare_string_uses_shared_prepare():
     # Should use default's prepare image, not admin's
     assert f"/{DUMMY_APPNAME}:prepare AS build" in dockerfile
     assert f"/{DUMMY_APPNAME}-admin:prepare" not in dockerfile
+
+
+# ---------------------------------------------------------------------------
+# Regression: tell_build_deps() cycle detection (fixes infinite loop)
+# ---------------------------------------------------------------------------
+
+
+def test_tell_build_deps_cycle():
+    """tell_build_deps must detect circular from: and raise SystemExit, not loop."""
+    builds = {"a": {"from": "b"}, "b": {"from": "a"}}
+    with pytest.raises(SystemExit):
+        tell_build_deps(builds, "a")
+
+
+def test_tell_build_deps_self_cycle():
+    """A build with from: pointing to itself should be caught."""
+    builds = {"x": {"from": "x"}}
+    with pytest.raises(SystemExit):
+        tell_build_deps(builds, "x")
+
+
+# ---------------------------------------------------------------------------
+# Regression: lain push --name <missing> config-level validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_push_name_not_found():
+    """lain push --name nonexistent should fail with a clear config error."""
+    res = run(lain, args=["push", "--name", "nonexistent"], returncode=1)
+    assert "not found" in res.output
+    assert "available" in res.output

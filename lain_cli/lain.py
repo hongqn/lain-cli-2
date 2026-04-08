@@ -2480,6 +2480,12 @@ def push(ctx, images, pull, overwrite_latest, registry, build_name):
             banyun(image, pull=pull, registry=registry, overwrite_latest_tag=True)
         ctx.exit(0)
 
+    if builds and build_name and build_name not in builds:
+        error(
+            f"build '{build_name}' not found in builds config, available: {', '.join(builds.keys())}",
+            exit=True,
+        )
+
     appname = ctx.obj.get("appname")
     if not appname:
         return

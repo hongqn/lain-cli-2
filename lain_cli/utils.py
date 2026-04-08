@@ -1186,7 +1186,7 @@ def tell_build_order(builds):
 
 def tell_build_deps(builds, build_name):
     """Return ordered list of builds that must be built before build_name (inclusive).
-    Follows `from:` chain upward.
+    Follows `from:` chain upward.  Detects circular references.
 
     >>> tell_build_deps({"a": {}, "b": {"from": "a"}, "c": {"from": "b"}}, "c")
     ['a', 'b', 'c']
@@ -1194,8 +1194,15 @@ def tell_build_deps(builds, build_name):
     ['b']
     """
     chain = []
+    seen = set()
     current = build_name
     while current:
+        if current in seen:
+            error(
+                f"circular 'from' dependency detected: {' -> '.join(chain)} -> {current}",
+            )
+            raise SystemExit(1)
+        seen.add(current)
         chain.append(current)
         current = builds.get(current, {}).get("from")
     chain.reverse()
