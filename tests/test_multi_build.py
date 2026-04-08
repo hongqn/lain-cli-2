@@ -6,7 +6,10 @@ import pytest
 
 from lain_cli.utils import (
     DEFAULT_BUILD_NAME,
+    context,
     make_image_str,
+    tell_build_deps,
+    tell_build_order,
     tell_builds,
     tell_image_repo,
     yadu,
@@ -329,3 +332,317 @@ def test_build_name_valid_with_old_format():
     # it gets past validation (will fail at docker step, not at name validation)
     res = run(lain, args=["build", "--name", "default"], returncode=None)
     assert "not found" not in res.output
+
+
+# ===========================================================================
+# Phase 2: from: build chaining and prepare: <string> sharing
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# tell_build_order(): topological sort
+# ---------------------------------------------------------------------------
+
+
+def test_tell_build_order_no_deps():
+    """Builds without from: should maintain insertion order."""
+    builds = {"a": {}, "b": {}, "c": {}}
+    result = tell_build_order(builds)
+    assert result == ["a", "b", "c"]
+
+
+def test_tell_build_order_with_deps():
+    """Builds with from: should come after their parent."""
+    builds = {"worker": {"from": "default"}, "default": {}, "sidecar": {}}
+    result = tell_build_order(builds)
+    assert result.index("default") < result.index("worker")
+    assert len(result) == 3
+
+
+def test_tell_build_order_chain():
+    """Multi-level from: chain should be ordered correctly."""
+    builds = {
+        "c": {"from": "b"},
+        "b": {"from": "a"},
+        "a": {},
+    }
+    result = tell_build_order(builds)
+    assert result == ["a", "b", "c"]
+
+
+def test_tell_build_order_cycle():
+    """Circular from: dependency should be detected."""
+    builds = {"a": {"from": "b"}, "b": {"from": "a"}}
+    # tell_build_order calls error() with exit=1 on cycle
+    # In test context this raises SystemExit
+    with pytest.raises(SystemExit):
+        tell_build_order(builds)
+
+
+# ---------------------------------------------------------------------------
+# tell_build_deps(): dependency chain for --name
+# ---------------------------------------------------------------------------
+
+
+def test_tell_build_deps_no_deps():
+    """Build without from: should return just itself."""
+    builds = {"a": {}, "b": {}}
+    assert tell_build_deps(builds, "b") == ["b"]
+
+
+def test_tell_build_deps_with_chain():
+    """Build with from: chain should return parents first."""
+    builds = {
+        "a": {},
+        "b": {"from": "a"},
+        "c": {"from": "b"},
+    }
+    assert tell_build_deps(builds, "c") == ["a", "b", "c"]
+
+
+def test_tell_build_deps_single_parent():
+    """Build with single from: should return [parent, self]."""
+    builds = {"default": {}, "worker": {"from": "default"}}
+    assert tell_build_deps(builds, "worker") == ["default", "worker"]
+
+
+# ---------------------------------------------------------------------------
+# tell_builds() with from: and prepare: <string>
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_tell_builds_with_from():
+    """Builds with from: should be returned as-is (resolution happens elsewhere)."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "worker": {"from": "default", "script": ["echo extra"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    _, builds = run_under_click_context(tell_builds)
+    assert builds["worker"]["from"] == "default"
+    assert "base" not in builds["worker"]
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_tell_builds_with_prepare_string():
+    """Builds with prepare: <string> should be returned as-is."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {
+            "base": "python:3.12",
+            "prepare": {"keep": ["req.txt"], "script": ["pip install"]},
+            "script": ["echo ok"],
+        },
+        "admin": {"prepare": "default", "script": ["echo admin"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    _, builds = run_under_click_context(tell_builds)
+    assert builds["admin"]["prepare"] == "default"
+
+
+# ---------------------------------------------------------------------------
+# Lint: from: and prepare: <string> validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_lint_from_invalid_reference():
+    """lint should error when from: references nonexistent build."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "worker": {"from": "nonexistent", "script": ["echo"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["-s", "lint"], returncode=1)
+    assert "nonexistent" in res.output
+    assert "not defined" in res.output
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_lint_from_with_base_conflicts():
+    """lint should error when build has both from: and base:."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "worker": {"from": "default", "base": "node:20", "script": ["echo"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["-s", "lint"], returncode=1)
+    assert "cannot have both" in res.output
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_lint_from_with_prepare_dict_conflicts():
+    """lint should error when build has both from: and prepare: (dict)."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "worker": {
+            "from": "default",
+            "prepare": {"script": ["pip install"]},
+            "script": ["echo"],
+        },
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["-s", "lint"], returncode=1)
+    assert "cannot have both" in res.output
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_lint_from_valid():
+    """lint should pass with valid from: references."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "worker": {"from": "default", "script": ["echo extra"]},
+    }
+    values["deployments"]["web"]["build"] = "worker"
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["-s", "lint"], returncode=0)
+    assert "not defined" not in res.output
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_lint_prepare_string_invalid():
+    """lint should error when prepare: <string> references nonexistent build."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "admin": {"prepare": "nonexistent", "script": ["echo"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["-s", "lint"], returncode=1)
+    assert "nonexistent" in res.output
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_lint_prepare_string_no_prepare_in_target():
+    """lint should error when prepare: <string> target has no prepare definition."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "admin": {"prepare": "default", "script": ["echo"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["-s", "lint"], returncode=1)
+    assert "no prepare definition" in res.output
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_lint_prepare_string_valid():
+    """lint should pass when prepare: <string> references a build with prepare."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {
+            "base": "python:3.12",
+            "prepare": {"keep": ["req.txt"], "script": ["pip install"]},
+            "script": ["echo ok"],
+        },
+        "admin": {"prepare": "default", "script": ["echo admin"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["-s", "lint"], returncode=0)
+    assert "not defined" not in res.output
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_lint_circular_from():
+    """lint should detect circular from: dependencies."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "a": {"from": "b", "script": ["echo a"]},
+        "b": {"from": "a", "script": ["echo b"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["-s", "lint"], returncode=1)
+    assert "circular" in res.output
+
+
+# ---------------------------------------------------------------------------
+# Dockerfile rendering: from: and prepare: <string>
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_template_from_build_uses_parent_image():
+    """Build with from: should render Dockerfile FROM parent's image."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "worker": {"from": "default", "script": ["echo extra"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+
+    # Render template for worker build to check FROM line
+    from lain_cli.utils import template_env, DOCKERFILE_NAME
+
+    def render_worker_dockerfile():
+        ctx = context()
+        from lain_cli.utils import tell_image_repo
+
+        builds = tell_builds()
+        build_clause = builds["worker"]
+        ctx.obj["build_clause"] = build_clause
+        ctx.obj["build_image_repo"] = tell_image_repo("worker")
+        ctx.obj["from_build_image"] = make_image_str(
+            registry="registry.test", image_tag="test-tag", build_name="default"
+        )
+        ctx.obj["shared_prepare_repo"] = None
+        ctx.obj["current_build_stage"] = "build"
+        template = template_env.get_template(f"{DOCKERFILE_NAME}.j2")
+        return template.render(**ctx.obj)
+
+    _, dockerfile = run_under_click_context(render_worker_dockerfile)
+    assert "FROM registry.test/dummy:test-tag AS build" in dockerfile
+    assert "FROM python:3.12" not in dockerfile
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_template_prepare_string_uses_shared_prepare():
+    """Build with prepare: <string> should use referenced build's prepare image."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {
+            "base": "python:3.12",
+            "prepare": {"keep": ["req.txt"], "script": ["pip install"]},
+            "script": ["echo ok"],
+        },
+        "admin": {"prepare": "default", "script": ["echo admin"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+
+    from lain_cli.utils import template_env, DOCKERFILE_NAME
+
+    def render_admin_dockerfile():
+        ctx = context()
+        from lain_cli.utils import tell_image_repo
+
+        builds = tell_builds()
+        build_clause = builds["admin"]
+        ctx.obj["build_clause"] = build_clause
+        ctx.obj["build_image_repo"] = tell_image_repo("admin")
+        ctx.obj["from_build_image"] = None
+        ctx.obj["shared_prepare_repo"] = tell_image_repo("default")
+        ctx.obj["current_build_stage"] = "build"
+        template = template_env.get_template(f"{DOCKERFILE_NAME}.j2")
+        return template.render(**ctx.obj)
+
+    _, dockerfile = run_under_click_context(render_admin_dockerfile)
+    # Should use default's prepare image, not admin's
+    assert f"/{DUMMY_APPNAME}:prepare AS build" in dockerfile
+    assert f"/{DUMMY_APPNAME}-admin:prepare" not in dockerfile

@@ -1131,6 +1131,77 @@ def tell_builds():
     return {}
 
 
+def tell_build_order(builds):
+    """Return build names in topological order based on `from:` dependencies.
+    Builds with `from:` must be built after the build they depend on.
+    Detects circular references.
+
+    >>> tell_build_order({"a": {}, "b": {"from": "a"}, "c": {}})
+    ['a', 'c', 'b']
+    >>> tell_build_order({"x": {}, "y": {}})
+    ['x', 'y']
+    """
+    # Build adjacency: child -> parent
+    deps = {}
+    for name, clause in builds.items():
+        parent = clause.get("from")
+        if parent:
+            deps[name] = parent
+
+    # Detect cycles
+    for name in deps:
+        chain = []
+        current = name
+        seen = set()
+        while current in deps:
+            if current in seen:
+                error(
+                    f"circular 'from' dependency detected: {' -> '.join(chain)} -> {current}",
+                )
+                raise SystemExit(1)
+            seen.add(current)
+            chain.append(current)
+            current = deps[current]
+
+    # Topological sort via Kahn's algorithm
+    in_degree = {name: 0 for name in builds}
+    children = {name: [] for name in builds}
+    for child, parent in deps.items():
+        in_degree[child] += 1
+        if parent in children:
+            children[parent].append(child)
+
+    queue = [name for name in builds if in_degree[name] == 0]
+    result = []
+    while queue:
+        node = queue.pop(0)
+        result.append(node)
+        for child in children.get(node, []):
+            in_degree[child] -= 1
+            if in_degree[child] == 0:
+                queue.append(child)
+
+    return result
+
+
+def tell_build_deps(builds, build_name):
+    """Return ordered list of builds that must be built before build_name (inclusive).
+    Follows `from:` chain upward.
+
+    >>> tell_build_deps({"a": {}, "b": {"from": "a"}, "c": {"from": "b"}}, "c")
+    ['a', 'b', 'c']
+    >>> tell_build_deps({"a": {}, "b": {}}, "b")
+    ['b']
+    """
+    chain = []
+    current = build_name
+    while current:
+        chain.append(current)
+        current = builds.get(current, {}).get("from")
+    chain.reverse()
+    return chain
+
+
 def tell_image_repo(build_name=None):
     """Return the image repository name for a given build.
     'default' or None returns appname; others return appname-{build_name}."""
@@ -2937,7 +3008,21 @@ def try_lain_prepare(keep_dockerfile=False, build_name=None):
         build_clause = builds.get(build_name, {})
     else:
         build_clause = next(iter(builds.values()), {})
+
+    # If this build uses `from:`, it has no prepare of its own
+    if build_clause.get("from"):
+        return
+
     prepare_clause = build_clause.get("prepare")
+
+    # prepare: <string> means share another build's prepare image
+    if isinstance(prepare_clause, str):
+        # The referenced build's prepare should already be built;
+        # we just need to ensure it's available locally
+        ref_build_name = prepare_clause
+        try_lain_prepare(keep_dockerfile=keep_dockerfile, build_name=ref_build_name)
+        return
+
     if not prepare_clause:
         return
 
@@ -3021,6 +3106,21 @@ def lain_build(stage="build", push=True, keep_dockerfile=False, build_name=None)
     # Inject build_clause and image repo into context for Dockerfile.j2 template
     ctx.obj["build_clause"] = build_clause
     ctx.obj["build_image_repo"] = tell_image_repo(build_name)
+
+    # Handle `from:` — use parent build's image as base
+    from_build = build_clause.get("from")
+    if from_build:
+        ctx.obj["from_build_image"] = make_image_str(build_name=from_build)
+    else:
+        ctx.obj["from_build_image"] = None
+
+    # Handle `prepare: <string>` — use referenced build's prepare image
+    prepare_clause = build_clause.get("prepare")
+    if isinstance(prepare_clause, str):
+        ref_build_name = prepare_clause
+        ctx.obj["shared_prepare_repo"] = tell_image_repo(ref_build_name)
+    else:
+        ctx.obj["shared_prepare_repo"] = None
     prepare_clause = build_clause.get("prepare")
     if stage == "prepare" and not prepare_clause:
         build_yaml = yadu(build_clause)
