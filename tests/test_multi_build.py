@@ -678,3 +678,41 @@ def test_push_name_not_found():
     res = run(lain, args=["push", "--name", "nonexistent"], returncode=1)
     assert "not found" in res.output
     assert "available" in res.output
+
+
+# ---------------------------------------------------------------------------
+# lain image-repos: list image repository names
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_image_repos_single_build():
+    """image-repos with old-style build: should output just appname."""
+    res = run(lain, args=["image-repos"])
+    assert DUMMY_APPNAME in res.output.strip()
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_image_repos_multi_build():
+    """image-repos with builds: should list all repos."""
+    values = load_dummy_values()
+    del values["build"]
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo"]},
+        "gpu": {"base": "nvidia/cuda:12.6", "script": ["echo"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["image-repos"])
+    lines = res.output.strip().splitlines()
+    assert DUMMY_APPNAME in lines
+    assert f"{DUMMY_APPNAME}-gpu" in lines
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_image_repos_no_build():
+    """image-repos with no build config should output appname."""
+    values = load_dummy_values()
+    del values["build"]
+    yadu(values, DUMMY_VALUES_PATH)
+    res = run(lain, args=["image-repos"])
+    assert DUMMY_APPNAME in res.output.strip()
