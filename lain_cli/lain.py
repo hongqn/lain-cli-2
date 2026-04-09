@@ -2499,6 +2499,20 @@ def push(ctx, images, pull, overwrite_latest, registry, build_name):
     ctx.exit(0)
 
 
+@lain.command()
+@click.pass_context
+def image_repos(ctx):
+    """list image repository names for all builds"""
+    builds = tell_builds()
+    if not builds:
+        appname = ctx.obj.get("appname")
+        if appname:
+            echo(appname)
+        return
+    for name in builds:
+        echo(tell_image_repo(name))
+
+
 @lain.group()
 @click.pass_context
 def env(ctx):
