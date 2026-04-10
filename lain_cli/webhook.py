@@ -21,7 +21,11 @@ from lain_cli.utils import (
 def tell_webhook_client(hook_url: str | None = None) -> "Webhook | None":
     ctx = context()
     obj = ctx.obj
-    config = obj.get("values", {}).get("webhook", {})
+    values = obj.get("values")
+    if isinstance(values, dict):
+        config = values.get("webhook", {})
+    else:
+        config = getattr(values, "webhook", {}) or {}
     hook_url = hook_url or config.get("url")
     if not hook_url:
         return
