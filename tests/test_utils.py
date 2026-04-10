@@ -12,6 +12,7 @@ from lain_cli.aliyun import AliyunRegistry
 from lain_cli.harbor import HarborRegistry
 from lain_cli.utils import (
     CLUSTER_VALUES_DIR,
+    ClusterConfigSchema,
     DOCKERIGNORE_NAME,
     banyun,
     change_dir,
@@ -34,6 +35,7 @@ from lain_cli.utils import (
     tell_ingress_urls,
     tell_job_names,
     tell_release_name,
+    update_canary_annotations,
     yadu,
     yalo,
 )
@@ -209,6 +211,16 @@ def test_tell_helm_options():
     assert extra_values_file_name.endswith(".yaml")
 
 
+def test_update_canary_annotations_without_canary_groups():
+    cli_result, _ = run_under_click_context(
+        update_canary_annotations,
+        args=["dummy-canary"],
+        obj={"values": {}},
+        returncode=1,
+    )
+    assert "canaryGroups not defined in values" in cli_result.output
+
+
 def parse_helm_set_clause_from_options(options):
     set_clause = options[options.index("--set") + 1]
     pair_list = set_clause.split(",")
@@ -309,6 +321,39 @@ def test_cluster_values_override():
         tell_cluster_config,
     )
     assert cc["registry"] == fake_registry
+
+
+def test_cluster_config_schema_current_cluster_resolves_secrets_env(mocker):
+    mocker.patch.dict(
+        "lain_cli.utils.ENV",
+        {"DUMMY_SECRET_ENV": "shhh"},
+        clear=False,
+    )
+    data = {
+        "domain": "example.com",
+        "secrets_env": {
+            "registry_password": {
+                "env_name": "DUMMY_SECRET_ENV",
+                "hint": "set env",
+            }
+        },
+    }
+
+    cc = ClusterConfigSchema.load(data, context={"is_current": True})
+
+    assert cc["registry_password"] == "shhh"
+    assert "secrets_env" not in cc
+
+
+def test_cluster_config_schema_non_current_cluster_keeps_secrets_env():
+    data = {
+        "domain": "example.com",
+        "secrets_env": {"registry_password": "DUMMY_SECRET_ENV"},
+    }
+
+    cc = ClusterConfigSchema.load(data, context={"is_current": False})
+
+    assert cc["secrets_env"] == {"registry_password": "DUMMY_SECRET_ENV"}
 
 
 @pytest.mark.usefixtures("dummy_helm_chart")
