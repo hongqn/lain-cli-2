@@ -7,10 +7,10 @@ services:
     {% if proc.image %}
     image: {{ proc.image }}
     {% elif proc.imageTag %}
-    image: {{ cluster_config['registry'] }}/{{ appname }}:{{ proc.imageTag }}
+    image: {{ cluster_config.registry }}/{{ appname }}:{{ proc.imageTag }}
     {% else %}
     # lain push will overwrite the latest tag every time
-    image: {{ cluster_config['registry'] }}/{{ appname }}:latest
+    image: {{ cluster_config.registry }}/{{ appname }}:latest
     pull_policy: always
     {% endif %}
     command:

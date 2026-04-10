@@ -47,16 +47,6 @@ def validate_canary_group_annotations(value: Any) -> Any:
 
 
 class SchemaModel(BaseModel):
-    @classmethod
-    def load(
-        cls, data: Any, *, context: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        model = cls.model_validate(data, context=context)
-        return cast(
-            dict[str, Any],
-            model.model_dump(mode="python", by_alias=True, exclude_none=True),
-        )
-
     def ensure_model_extra(self) -> dict[str, Any]:
         extra = self.model_extra
         if extra is None:
@@ -79,7 +69,7 @@ class PrepareSchema(LenientSchema):
 
     @field_validator("keep")
     @classmethod
-    def finalize_keep(cls, keep: list[str]) -> list[str]:
+    def finalize_keep(_cls, keep: list[str]) -> list[str]:
         new_keep = []
         for k in keep:
             if "*" in k:
@@ -129,7 +119,7 @@ class ReleaseSchema(LenientSchema):
 
     @field_validator("copy_", mode="before")
     @classmethod
-    def parse_copy_items(cls, value: Any) -> list[dict[str, str]]:
+    def parse_copy_items(_cls, value: Any) -> list[dict[str, str]]:
         if value is None:
             return []
         return [parse_copy(item) for item in value]
@@ -141,7 +131,7 @@ class VolumeMountSchema(LenientSchema):
 
     @field_validator("subPath")
     @classmethod
-    def validate_sub_path(cls, value: str | None) -> str | None:
+    def validate_sub_path(_cls, value: str | None) -> str | None:
         if value is None:
             return value
         bn = basename(value)
@@ -180,7 +170,7 @@ class ProcSchema(LenientSchema):
 
     @field_validator("command")
     @classmethod
-    def validate_command(cls, value: list[str]) -> list[str]:
+    def validate_command(_cls, value: list[str]) -> list[str]:
         if not value:
             raise ValueError("command should not be empty")
         executable = value[0]
@@ -293,7 +283,7 @@ class HelmValuesSchema(LenientSchema):
 
     @field_validator("appname", "releaseName")
     @classmethod
-    def validate_reserved_word_field(cls, value: str | None) -> str | None:
+    def validate_reserved_word_field(_cls, value: str | None) -> str | None:
         if value is None:
             return value
         return validate_reserved_word(value)
@@ -314,12 +304,12 @@ class HelmValuesSchema(LenientSchema):
         mode="before",
     )
     @classmethod
-    def validate_reserved_word_mapping(cls, value: Any) -> Any:
+    def validate_reserved_word_mapping(_cls, value: Any) -> Any:
         return validate_reserved_word_mapping_keys(value)
 
     @field_validator("canaryGroups", mode="before")
     @classmethod
-    def validate_canary_groups(cls, value: Any) -> Any:
+    def validate_canary_groups(_cls, value: Any) -> Any:
         return validate_canary_group_annotations(value)
 
     @staticmethod

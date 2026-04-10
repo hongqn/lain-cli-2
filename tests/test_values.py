@@ -25,11 +25,13 @@ from tests.conftest import (
     tell_ing_name,
 )
 
+assert TEST_CLUSTER_CONFIG is not None
+
 
 @pytest.mark.usefixtures("dummy_helm_chart")
 def test_values():
     values = load_dummy_values()
-    domain = TEST_CLUSTER_CONFIG["domain"]
+    domain = TEST_CLUSTER_CONFIG.domain
     values["env"] = {"SOMETHING": "ELSE", "OVERRIDE_BY_PROC": "old"}
     ing_anno = {"fake-annotations": "bar"}
     values["ingresses"] = [
@@ -63,7 +65,7 @@ def test_values():
     yadu(values, DUMMY_VALUES_PATH)
     k8s_specs = render_k8s_specs()
     ingresses = [spec for spec in k8s_specs if spec["kind"] == "Ingress"]
-    domain = TEST_CLUSTER_CONFIG["domain"]
+    domain = TEST_CLUSTER_CONFIG.domain
     internal_ing = next(
         ing
         for ing in ingresses
@@ -77,7 +79,7 @@ def test_values():
         if ing["metadata"]["name"] == "dummy-public-com-dummy-web"
     )
     dic_contains(dummy_public_com["metadata"]["annotations"], ing_anno)
-    if "clusterIssuer" in TEST_CLUSTER_CONFIG:
+    if getattr(TEST_CLUSTER_CONFIG, "clusterIssuer", None):
         # when tls is not available, skip this test
         for ing in ingresses:
             spec = ing["spec"]
@@ -113,7 +115,7 @@ def test_values():
 
     assert env_dic == {
         "LAIN_CLUSTER": TEST_CLUSTER,
-        "K8S_NAMESPACE": TEST_CLUSTER_CONFIG.get("namespace", "default"),
+        "K8S_NAMESPACE": getattr(TEST_CLUSTER_CONFIG, "namespace", "default"),
         "IMAGE_TAG": "UNKNOWN",
         "SOMETHING": "ELSE",
         "OVERRIDE_BY_PROC": "new",
@@ -174,7 +176,7 @@ def test_duplicate_proc_names():
     del web["resources"]
     values["cronjobs"] = {"web": web}
     with pytest.raises(ValidationError) as e:
-        HelmValuesSchema.load(values)
+        HelmValuesSchema.model_validate(values)
 
     assert "proc names should not duplicate" in str(e)
 
@@ -186,14 +188,14 @@ def test_reserved_words():
     web_proc = bare_values["deployments"]["web"]
     bare_values["deployments"] = {"cronjobs": web_proc}
     with pytest.raises(ValidationError) as e:
-        HelmValuesSchema.load(bare_values)
+        HelmValuesSchema.model_validate(bare_values)
 
     assert "this is a reserved word" in str(e)
 
     bare_values = load_dummy_values()
     bare_values["deployments"] = {"copy": web_proc}
     with pytest.raises(ValidationError) as e:
-        HelmValuesSchema.load(bare_values)
+        HelmValuesSchema.model_validate(bare_values)
 
     assert "this is a reserved word" in str(e)
 
@@ -208,30 +210,33 @@ def test_schemas():
     bare_values["ing"] = [{"host": "dummy", "deployName": "web", "paths": ["/"]}]
     yadu(bare_values, DUMMY_VALUES_PATH)
     _, values = run_under_click_context(load_helm_values, (DUMMY_VALUES_PATH,))
-    assert values["deployments"]["web"] == values["deployments"]["another"]
-    assert values["jobs"]["single"] == {"command": ["echo", "nothing"]}
-    assert {"host": "dummy", "deployName": "web", "paths": ["/"]} in values["ingresses"]
-    assert values["cronjobs"] == {}
-    build = values["build"]
-    assert build["prepare"]["keep"] == [f"./{BUILD_TREASURE_NAME}"]
+    assert values.deployments["web"] == values.deployments["another"]
+    assert values.jobs["single"].command == ["echo", "nothing"]
+    assert any(
+        ing.host == "dummy" and ing.deployName == "web" and ing.paths == ["/"]
+        for ing in values.ingresses
+    )
+    assert values.cronjobs == {}
+    build = values.build
+    assert build.prepare.keep == [f"./{BUILD_TREASURE_NAME}"]
 
     bare_values["volumeMounts"][0]["subPath"] = "foo/bar"  # should be basename
     with pytest.raises(ValidationError) as e:
-        HelmValuesSchema.load(bare_values)
+        HelmValuesSchema.model_validate(bare_values)
 
     assert "subPath should be" in str(e)
 
     bare_values = load_dummy_values()
     bare_values["deployments"]["web"]["command"] = []
     with pytest.raises(ValidationError) as e:
-        HelmValuesSchema.load(bare_values)
+        HelmValuesSchema.model_validate(bare_values)
 
     assert "command should not be empty" in str(e)
 
     false_ing = {"host": "dummy", "deployName": "web"}
     with pytest.raises(ValidationError):
-        IngressSchema.load(false_ing)
+        IngressSchema.model_validate(false_ing)
 
     bad_web = {"containerPort": 8000}
     with pytest.raises(ValidationError):
-        IngressSchema.load(bad_web)
+        IngressSchema.model_validate(bad_web)

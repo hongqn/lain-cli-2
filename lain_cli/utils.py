@@ -27,7 +27,7 @@ from os import getppid, makedirs, readlink, remove, unlink
 from os.path import abspath, basename, dirname, exists, expanduser, isdir, isfile, join
 from tempfile import TemporaryDirectory, mkstemp
 from time import sleep, time
-from typing import Any, Literal, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
 import click
 import psutil
@@ -55,6 +55,9 @@ from ruamel.yaml.parser import ParserError
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from lain_cli import __version__, package_name
+
+if TYPE_CHECKING:
+    from lain_cli.schemas import ClusterConfigSchema, HelmValuesSchema
 
 yaml = YAML()
 ENV = os.environ.copy()
@@ -289,7 +292,7 @@ def must_get_env(name, fail_msg=""):
 def tell_pods_count():
     ctx = context()
     values = ctx.obj["values"]
-    count = sum(proc.get("replicaCount", 1) for proc in values["deployments"].values())
+    count = sum(proc.replicaCount for proc in values.deployments.values())
     return count
 
 
@@ -304,9 +307,9 @@ def tell_pod_deploy_name(s):
 
 
 def tell_domain_suffix(cc):
-    domain_suffix = cc.get("domain_suffix")
+    domain_suffix = cc.domain_suffix
     if not domain_suffix:
-        domain = cc.get("domain")
+        domain = cc.domain
         domain_suffix = f".{domain}" if domain else ""
 
     return domain_suffix
@@ -339,28 +342,28 @@ def make_internal_url(host, paths=None, port=80, domain_suffix=None):
 def tell_ingress_urls():
     ctx = context()
     values = ctx.obj["values"]
-    ingresses = values.get("ingresses") or []
+    ingresses = values.ingresses or []
     cc = tell_cluster_config()
-    if not cc:
+    if cc is None:
         return
     domain_suffix = tell_domain_suffix(cc)
-    ingress_internal_port = cc.get("ingress_internal_port", 80)
-    ingress_external_port = cc.get("ingress_external_port", 80)
+    ingress_internal_port = getattr(cc, "ingress_internal_port", 80)
+    ingress_external_port = getattr(cc, "ingress_external_port", 80)
     part1 = itertools.chain.from_iterable(
         [
             make_internal_url(
-                i["host"],
-                paths=i["paths"],
+                i.host,
+                paths=i.paths,
                 port=ingress_internal_port,
                 domain_suffix=domain_suffix,
             )
             for i in ingresses
         ]
     )
-    externalIngresses = values.get("externalIngresses") or []
+    external_ingresses = values.externalIngresses or []
     part2 = itertools.chain.from_iterable(
-        make_external_url(i["host"], paths=i["paths"], port=ingress_external_port)
-        for i in externalIngresses
+        make_external_url(i.host, paths=i.paths, port=ingress_external_port)
+        for i in external_ingresses
     )
     return list(part1) + list(part2)
 
@@ -491,11 +494,17 @@ def pick_pod(proc_name=None, phase=None, containerStatuses=None, selector=None):
 def tell_best_deploy():
     """deployment name with the most memory"""
     ctx = context()
-    deploys = ctx.obj["values"]["deployments"]
+    deploys = ctx.obj["values"].deployments
     chosen = list(deploys.keys())[0]
 
     def mem_limits(deploy):
-        mem_str = deploy.get("resources", {}).get("limits", {}).get("memory") or "1Gi"
+        if isinstance(deploy, dict):
+            mem_str = deploy.get("resources", {}).get("limits", {}).get("memory")
+        else:
+            resources = getattr(deploy, "resources", None)
+            limits = getattr(resources, "limits", None) if resources else None
+            mem_str = getattr(limits, "memory", None)
+        mem_str = mem_str or "1Gi"
         return parse_size(mem_str)
 
     for name, deploy in deploys.items():
@@ -550,7 +559,7 @@ def storage_class_can_reattach(sc_name):
 def update_canary_annotations(release_name, canary_group_name=None):
     """when calling with empty canary_group_name, will set canary-weight to 0%"""
     ctx = context()
-    canary_groups = ctx.obj["values"].get("canaryGroups")
+    canary_groups = ctx.obj["values"].canaryGroups
     if not canary_groups:
         error("canaryGroups not defined in values", exit=1)
 
@@ -584,7 +593,9 @@ def update_canary_annotations(release_name, canary_group_name=None):
 
 def deploy_toast(canary=False, re_creation_headsup=False):
     ctx = context()
-    ctx.obj.update(tell_cluster_config())
+    cc = tell_cluster_config()
+    if cc is not None:
+        ctx.obj.update(cc.model_dump(mode="python", exclude_none=True))
     if canary:
         template = template_env.get_template("canary-toast.txt.j2")
     elif re_creation_headsup:
@@ -604,9 +615,11 @@ def deploy_toast(canary=False, re_creation_headsup=False):
 def tell_grafana_url():
     release_name = tell_release_name()
     cc = tell_cluster_config()
-    grafana_url = cc.get("grafana_url")
+    if cc is None:
+        return
+    grafana_url = getattr(cc, "grafana_url", None)
     if grafana_url:
-        namespace = cc.get("namespace", "default")
+        namespace = getattr(cc, "namespace", "default")
         return f"{grafana_url}?orgId=1&refresh=10s&var-label_app={release_name}&var-namespace={namespace}"
 
 
@@ -620,7 +633,9 @@ def tell_kibana_url(release_name=None, proc=None):
         release_name = tell_release_name()
 
     cc = tell_cluster_config()
-    kibana_host = cc.get("kibana")
+    if cc is None:
+        return
+    kibana_host = getattr(cc, "kibana", None)
     if not kibana_host:
         return
     q = f"{release_name}-{proc}" if proc else release_name
@@ -641,7 +656,9 @@ def too_much_logs_headsup():
     # kubectl cannot tail from more than 8 log streams, when that happens,
     # print a help message to redirect users to kibana, if applicable
     ctx = context()
-    ctx.obj.update(tell_cluster_config())
+    cc = tell_cluster_config()
+    if cc is not None:
+        ctx.obj.update(cc.model_dump(mode="python", exclude_none=True))
     kibana_url = tell_kibana_url()
     headsup = too_much_logs_headsup_template.render(kibana_url=kibana_url, **ctx.obj)
     error(headsup)
@@ -766,27 +783,34 @@ class RegistryUtils:
         return images
 
 
-def tell_registry_client(cc: dict[str, Any] | None = None) -> RegistryUtils | None:
-    if not cc:
+def tell_registry_client(cc: Any = None) -> RegistryUtils | None:
+    if cc is None:
         cc = tell_cluster_config()
+    if cc is None:
+        return None
+    cc_kwargs = (
+        cc.model_dump(mode="python", exclude_none=True)
+        if hasattr(cc, "model_dump")
+        else cc
+    )
 
-    registry_type = cc.get("registry_type") or "registry"
+    registry_type = getattr(cc, "registry_type", None) or "registry"
     if registry_type == "registry":
         from lain_cli.registry import Registry
 
-        return Registry(**cc)
+        return Registry(**cc_kwargs)
     if registry_type == "aliyun":
         from lain_cli.aliyun import AliyunRegistry
 
-        return AliyunRegistry(**cc)
+        return AliyunRegistry(**cc_kwargs)
     if registry_type == "harbor":
         from lain_cli.harbor import HarborRegistry
 
-        return HarborRegistry(**cc)
+        return HarborRegistry(**cc_kwargs)
     if registry_type == "tencent":
         from lain_cli.tencent import TencentRegistry
 
-        return TencentRegistry(**cc)
+        return TencentRegistry(**cc_kwargs)
     warn(f"unsupported registry type: {registry_type}")
 
 
@@ -1013,8 +1037,8 @@ def tell_executor():
 
 def tell_job_timeout():
     values = context().obj["values"]
-    jobs = values.get("jobs") or {}
-    timeouts = set(job.get("activeDeadlineSeconds", 3600) for job in jobs.values())
+    jobs = values.jobs or {}
+    timeouts = set(getattr(job, "activeDeadlineSeconds", 3600) for job in jobs.values())
     # if no job is defined, set helm timeout to 5m
     timeouts.add(300)
     return max(timeouts)
@@ -1113,17 +1137,21 @@ def tell_builds():
     """
     ctx = context()
     values = ctx.obj["values"]
-    has_build = "build" in values
-    has_builds = "builds" in values
+    has_build = values.build is not None
+    has_builds = hasattr(values, "builds") and getattr(values, "builds") is not None
     if has_build and has_builds:
         error("cannot define both 'build' and 'builds' in values.yaml", exit=1)
     if has_builds:
-        return dict(values["builds"])
+        return dict(getattr(values, "builds"))
     if has_build:
-        build_clause = dict(values["build"])
+        build_clause = values.build.model_dump(
+            mode="python", by_alias=True, exclude_none=True
+        )
         # In old format, release: is top-level; merge it into build clause
-        if "release" in values:
-            build_clause["release"] = values["release"]
+        if values.release:
+            build_clause["release"] = values.release.model_dump(
+                mode="python", by_alias=True, exclude_none=True
+            )
         return {DEFAULT_BUILD_NAME: build_clause}
     return {}
 
@@ -1225,7 +1253,9 @@ def tell_image_tag(image_tag=None, build_name=None):
     """
     ctx = context()
     values = ctx.obj["values"]
-    use_lain_build = "build" in values or "builds" in values
+    use_lain_build = (
+        values.build is not None or getattr(values, "builds", None) is not None
+    )
     if not use_lain_build:
         # 如果压根不用 lain build, 那么也无法通过查询 registry 来推断镜像 tag
         return image_tag
@@ -1343,12 +1373,10 @@ def ensure_resource_initiated(chart=False, secret=False):
         # if volumeMounts are used in values.yaml but secret doesn't exists,
         # print error and then exit
         values = ctx.obj["values"]
-        subPaths = [
-            m["subPath"] for m in values.get("volumeMounts") or [] if m.get("subPath")
-        ]
+        subPaths = [m.subPath for m in values.volumeMounts or [] if m.subPath]
         secret_name = ctx.obj["secret_name"]
         # 如果 values 里边定制过了 volumes, 就绕过检查吧, 肯定是高级用户
-        if subPaths and not values.get("volumes"):
+        if subPaths and not getattr(values, "volumes", None):
             cluster = ctx.obj["cluster"]
             res = kubectl(
                 "get", "secret", secret_name, capture_output=True, check=False
@@ -1672,7 +1700,7 @@ def docker(
     docker_args = list(args)
     if ctx and ctx.obj.get("remote_docker"):
         cc = tell_cluster_config()
-        docker_host = cc.get("remote_docker")
+        docker_host = getattr(cc, "remote_docker", None) if cc is not None else None
         if docker_host:
             docker_args = ["-H", docker_host, *docker_args]
 
@@ -1726,7 +1754,7 @@ def banyun(image, registry=None, overwrite_latest_tag=False, pull=False, exit=No
     appname = repo.rsplit("/", 1)[-1]
     if not registry:
         cc = tell_cluster_config()
-        registry = cc["registry"]
+        registry = getattr(cc, "registry")
 
     new_image = make_image_str(registry, appname, tag)
     if pull:
@@ -1760,7 +1788,7 @@ def docker_save(image, output_dir, retag=None, force=False, pull=False, exit=Fal
     if retag:
         if retag in CLUSTERS:
             retag_cc = CLUSTERS[retag]
-            registry = retag_cc["registry"]
+            registry = retag_cc.registry
             appname = repo.rsplit("/", 1)[-1]
             new_image = make_image_str(registry, appname, tag)
         elif ":" in retag:
@@ -1961,9 +1989,13 @@ def git_remote(**kwargs: Any) -> str:
 def try_to_label_nodes():
     ctx = context()
     appname = ctx.obj["appname"]
-    procs = ctx.obj["values"]["procs"]
+    procs = ctx.obj["values"].procs
     for proc_name, proc in procs.items():
-        nodes = proc.get("nodes")
+        nodes = (
+            proc.get("nodes")
+            if isinstance(proc, dict)
+            else getattr(proc, "nodes", None)
+        )
         if not nodes:
             continue
         label_name = f"{appname}-{proc_name}"
@@ -1974,9 +2006,9 @@ def try_to_label_nodes():
 
 def tell_job_names(appname_prefix=True):
     values = load_helm_values()
-    appname = values["appname"]
+    appname = values.appname
     job_names = []
-    for proc_name in values.get("jobs") or {}:
+    for proc_name in values.jobs or {}:
         job_name = f"{appname}-{proc_name}" if appname_prefix else proc_name
         job_names.append(job_name)
 
@@ -2121,8 +2153,10 @@ def get_pod_rc(pod_name, tries=5):
 
 def tell_release_name():
     ctx = context()
-    values = ctx.obj.get("values") or {}
-    return values.get("releaseName") or ctx.obj.get("appname")
+    values = ctx.obj.get("values")
+    if values is None:
+        return ctx.obj.get("appname")
+    return values.releaseName or ctx.obj.get("appname")
 
 
 def is_inside_cluster():
@@ -2452,7 +2486,7 @@ def validate_proc_name(ctx, param, value):
     if not value:
         return value
     ctx = context()
-    procs = ctx.obj["values"]["procs"]
+    procs = ctx.obj["values"].procs
     if value not in procs:
         proc_names = list(procs)
         raise BadParameter(f"{value} not found in procs, choose from {proc_names}")
@@ -2506,7 +2540,7 @@ def update_extra_values(values, cluster=None, ignore_extra=False):
 
 def load_helm_values(
     values_yaml: Any = f"./{CHART_DIR_NAME}/values.yaml",
-) -> dict[str, Any]:
+) -> "HelmValuesSchema":
     from lain_cli.schemas import HelmValuesSchema
 
     if hasattr(values_yaml, "read"):
@@ -2517,7 +2551,7 @@ def load_helm_values(
 
     update_extra_values(values)
     try:
-        loaded = HelmValuesSchema.load(values)
+        loaded = HelmValuesSchema.model_validate(values)
     except ValidationError as e:
         error("your values.yaml did not pass schema check:")
         error(e, exit=1)
@@ -2543,7 +2577,7 @@ def ensure_helm_initiated():
     values_yaml = f"./{CHART_DIR_NAME}/values.yaml"
     try:
         values = load_helm_values(values_yaml)
-        appname = obj["appname"] = values["appname"]
+        appname = obj["appname"] = values.appname
         obj["values"] = values
         obj["secret_name"] = f"{appname}-secret"
         obj["env_name"] = f"{appname}-env"
@@ -2630,13 +2664,13 @@ def top_procs(appname):
     result = {}
     cc = tell_cluster_config()
     values = context().obj["values"]
-    if "prometheus" in cc:
+    if cc is not None and getattr(cc, "prometheus", None):
         from lain_cli.prometheus import Prometheus
 
         prometheus = Prometheus()
     else:
         return result
-    for proc_name, proc in values["procs"].items():
+    for proc_name, proc in values.procs.items():
         memory_top = prometheus.memory_quantile(appname, proc_name)
         if not memory_top:
             continue
@@ -2904,7 +2938,7 @@ def make_wildcard_domain(d):
 def make_image_str(registry=None, appname=None, image_tag=None, build_name=None):
     if not registry:
         cc = tell_cluster_config()
-        registry = cc["registry"]
+        registry = getattr(cc, "registry")
 
     if not image_tag:
         image_tag = lain_meta()
@@ -2976,9 +3010,9 @@ def version_challenge():
     session = PipSession()
     session.timeout = 2
     cc = tell_cluster_config()
-    if not cc:
+    if cc is None:
         return
-    pypi_index = cc["pypi_index"]
+    pypi_index = getattr(cc, "pypi_index")
     create_search_scope = cast(Any, SearchScope.create)
     try:
         search_scope = create_search_scope(
@@ -3009,7 +3043,7 @@ def version_challenge():
         [now.major == new.major, now.minor == new.minor, new.micro - now.micro <= 2]
     ):
         error(f"you are using {package_name}=={__version__}, upgrade before use:")
-        extra_index = cc.get("pypi_extra_index")
+        extra_index = getattr(cc, "pypi_extra_index", None)
         if extra_index:
             extra_clause = f"--extra-index-url {extra_index}"
         else:
@@ -3098,7 +3132,7 @@ def tell_cluster_values_file(cluster=None, internal=False):
 
 def tell_cluster_config(
     cluster: str | None = None, is_current: bool | None = None
-) -> dict[str, Any]:
+) -> "ClusterConfigSchema | None":
     from lain_cli.schemas import ClusterConfigSchema
 
     ctx = context(silent=True)
@@ -3113,7 +3147,7 @@ def tell_cluster_config(
     values_file = tell_cluster_values_file(cluster=cluster, internal=True)
     if not values_file:
         warn(f"cluster values not found for {cluster} inside {CLUSTER_VALUES_DIR}")
-        return {}
+        return None
 
     if is_current is None:
         try:
@@ -3125,7 +3159,9 @@ def tell_cluster_config(
     # cluster values can be overridden in values.yaml
     update_extra_values(data, cluster=cluster, ignore_extra=True)
     try:
-        cc = ClusterConfigSchema.load(data, context={"is_current": is_current})
+        cc = ClusterConfigSchema.model_validate(
+            data, context={"is_current": is_current}
+        )
     except ValidationError as e:
         error("your cluster config did not pass schema check:")
         error(e, exit=1)
@@ -3135,13 +3171,13 @@ def tell_cluster_config(
         if ctx:
             ctx.obj["cluster_config"] = cc
 
-        host_aliases = cast(list[dict[str, Any]], cc.get("hostAliases", []) or [])
+        host_aliases = cc.hostAliases or []
         if host_aliases:
             hosts_dic = get_hosts_dict()
             for h in host_aliases:
-                ip = h["ip"]
+                ip = h.ip
                 existing_names = hosts_dic[ip]
-                for name in h["hostnames"]:
+                for name in h.hostnames:
                     if name not in existing_names:
                         error(f"you should add this to /etc/hosts: {ip} {name}")
 
@@ -3167,7 +3203,7 @@ def tell_all_clusters():
         cluster_name = fname.split("-", 1)[-1]
         is_current = cluster_name == wanted_cluster
         cc = tell_cluster_config(cluster_name, is_current=is_current)
-        if not cc:
+        if cc is None:
             continue
         ccs[cluster_name] = cc
 
@@ -3188,7 +3224,8 @@ def tell_all_clusters():
 def lain_docs(path):
     cc = tell_cluster_config()
     sphinx_docs_url = (
-        cc.get("sphinx_docs_url") or "https://lain-cli.readthedocs.io/en/latest"
+        getattr(cc, "sphinx_docs_url", None)
+        or "https://lain-cli.readthedocs.io/en/latest"
     )
     url = join(sphinx_docs_url, path)
     return url

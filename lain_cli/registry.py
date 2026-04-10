@@ -18,7 +18,7 @@ class Registry(RequestClientMixin, RegistryUtils):
     def __init__(self, registry: str | None = None, **kwargs: Any) -> None:
         if not registry:
             cc = tell_cluster_config()
-            registry = cc["registry"]
+            registry = getattr(cc, "registry") if cc is not None else None
 
         assert registry is not None
         self.registry = registry

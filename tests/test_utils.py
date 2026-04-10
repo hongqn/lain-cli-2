@@ -10,7 +10,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 
 from lain_cli.aliyun import AliyunRegistry
 from lain_cli.harbor import HarborRegistry
-from lain_cli.schemas import ClusterConfigSchema
+from lain_cli.schemas import ClusterConfigSchema, HelmValuesSchema
 from lain_cli.utils import (
     CLUSTER_VALUES_DIR,
     DOCKERIGNORE_NAME,
@@ -35,6 +35,7 @@ from lain_cli.utils import (
     tell_ingress_urls,
     tell_job_names,
     tell_release_name,
+    user_challenge,
     update_canary_annotations,
     yadu,
     yalo,
@@ -149,8 +150,9 @@ def test_load_helm_values():
     _, values = run_under_click_context(
         load_helm_values,
     )
-    assert values["registry"] == "docker.io/timfeirg"
-    assert values["domain"] == "info"
+    assert isinstance(values, HelmValuesSchema)
+    assert getattr(values, "registry") == "docker.io/timfeirg"
+    assert getattr(values, "domain") == "info"
     dummy_jobs = {
         "init": {"command": ["echo", "nothing"]},
     }
@@ -161,7 +163,10 @@ def test_load_helm_values():
     _, values = run_under_click_context(
         load_helm_values,
     )
-    assert values["jobs"] == dummy_jobs
+    assert (
+        values.jobs["init"].model_dump(mode="python", by_alias=True, exclude_none=True)
+        == dummy_jobs["init"]
+    )
 
 
 @pytest.mark.usefixtures("dummy_helm_chart")
@@ -178,7 +183,7 @@ def test_tell_helm_options():
     def no_build_and_override_registry():
         obj = context().obj
         values = obj["values"]
-        del values["build"]
+        values.build = None
         pairs = [("registry", RANDOM_STRING)]
         return tell_helm_options(pairs)
 
@@ -215,7 +220,7 @@ def test_update_canary_annotations_without_canary_groups():
     cli_result, _ = run_under_click_context(
         update_canary_annotations,
         args=["dummy-canary"],
-        obj={"values": {}},
+        obj={"values": HelmValuesSchema.model_validate({"appname": "dummy"})},
         returncode=1,
     )
     assert "canaryGroups not defined in values" in cli_result.output
@@ -320,7 +325,8 @@ def test_cluster_values_override():
     _, cc = run_under_click_context(
         tell_cluster_config,
     )
-    assert cc["registry"] == fake_registry
+    assert isinstance(cc, ClusterConfigSchema)
+    assert getattr(cc, "registry") == fake_registry
 
 
 def test_cluster_config_schema_current_cluster_resolves_secrets_env(mocker):
@@ -339,10 +345,11 @@ def test_cluster_config_schema_current_cluster_resolves_secrets_env(mocker):
         },
     }
 
-    cc = ClusterConfigSchema.load(data, context={"is_current": True})
+    cc = ClusterConfigSchema.model_validate(data, context={"is_current": True})
 
-    assert cc["registry_password"] == "shhh"
-    assert "secrets_env" not in cc
+    assert cc.model_extra is not None
+    assert cc.model_extra["registry_password"] == "shhh"
+    assert cc.secrets_env is None
 
 
 def test_cluster_config_schema_non_current_cluster_keeps_secrets_env():
@@ -351,9 +358,31 @@ def test_cluster_config_schema_non_current_cluster_keeps_secrets_env():
         "secrets_env": {"registry_password": "DUMMY_SECRET_ENV"},
     }
 
-    cc = ClusterConfigSchema.load(data, context={"is_current": False})
+    cc = ClusterConfigSchema.model_validate(data, context={"is_current": False})
 
-    assert cc["secrets_env"] == {"registry_password": "DUMMY_SECRET_ENV"}
+    assert cc.secrets_env == {"registry_password": "DUMMY_SECRET_ENV"}
+
+
+def test_user_challenge_reads_user_from_helm_json(mocker):
+    mocker.patch(
+        "lain_cli.utils.helm",
+        return_value=subprocess.CompletedProcess(
+            args=["helm"],
+            returncode=0,
+            stdout=b'{"user":"alice"}',
+        ),
+    )
+    mocker.patch("lain_cli.utils.tell_executor", return_value="bob")
+    mocked_error = mocker.patch(
+        "lain_cli.utils.error",
+        side_effect=RuntimeError("ownership check triggered"),
+    )
+
+    with pytest.raises(RuntimeError, match="ownership check triggered"):
+        user_challenge("dummy")
+
+    mocked_error.assert_called_once()
+    assert "deployed by alice" in mocked_error.call_args[0][0]
 
 
 @pytest.mark.usefixtures("dummy_helm_chart")
@@ -381,7 +410,7 @@ def test_tell_all_clusters(mocker):
         tell_all_clusters,
     )
     assert set(ccs) == {TEST_CLUSTER, another_cluster_name}
-    assert ccs["another"]["registry"] == test_cluster_values["registry"]
+    assert getattr(ccs["another"], "registry") == test_cluster_values["registry"]
     tempd.cleanup()
 
 
@@ -411,12 +440,12 @@ def test_job_deploy_selection():
         obj = context().obj
         values = obj["values"]
         # add a jupyter deployment with more memory than web
-        values["deployments"]["jupyter"] = {
+        values.deployments["jupyter"] = {
             "command": ["jupyter"],
             "resources": {"limits": {"memory": "16Gi", "cpu": "1000m"}},
         }
         # default deploy selection: first key
-        deploys = values["deployments"]
+        deploys = values.deployments
         first_deploy = list(deploys.keys())[0]
         assert first_deploy == "web"
         # tell_best_deploy: picks highest memory

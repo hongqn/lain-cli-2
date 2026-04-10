@@ -388,7 +388,7 @@ def admin_status(ctx, simple):
         ).stdout
     ).splitlines()
     cc = tell_cluster_config()
-    ingress_external_port = cc.get("ingress_external_port", 80)
+    ingress_external_port = getattr(cc, "ingress_external_port", 80) if cc else 80
     urls = []
     for ing in ing_list:
         host, paths = ing.split()
@@ -519,8 +519,8 @@ def list_waste():
 @click.pass_context
 def migrate_registry(ctx: click.Context, cc_path: str) -> None:
     data = yalo(cc_path)
-    cc = ClusterConfigSchema.load(data, context={"is_current": True})
-    registry_addr = cc["registry"]
+    cc = ClusterConfigSchema.model_validate(data, context={"is_current": True})
+    registry_addr = getattr(cc, "registry")
     dest_registry = tell_registry_client(cc)
     if not dest_registry:
         error("destination registry client not available", exit=True)
@@ -679,14 +679,19 @@ def lint(ctx, simple):
         )
 
     # validate builds config
-    values = ctx.obj.get("values", {})
+    values = ctx.obj.get("values")
     builds = tell_builds()
     if builds:
         build_names = set(builds.keys())
         # check build references across all workload types
         for section in ("deployments", "cronjobs", "statefulSets", "jobs"):
-            for name, workload in values.get(section, {}).items():
-                ref = workload.get("build")
+            workloads = getattr(values, section, {}) or {}
+            for name, workload in workloads.items():
+                ref = (
+                    workload.get("build")
+                    if isinstance(workload, dict)
+                    else getattr(workload, "build", None)
+                )
                 if ref and ref not in build_names:
                     error(
                         f"{section[:-1]} {name} references build '{ref}' which is not defined in builds",
@@ -733,12 +738,24 @@ def lint(ctx, simple):
         # warn if multi-build but no default and some workloads lack build field
         if len(builds) > 1 and DEFAULT_BUILD_NAME not in build_names:
             for section in ("deployments", "cronjobs", "statefulSets", "jobs"):
-                for proc_name, proc in values.get(section, {}).items():
-                    if (
-                        not proc.get("build")
-                        and not proc.get("image")
-                        and not proc.get("imageTag")
-                    ):
+                workloads = getattr(values, section, {}) or {}
+                for proc_name, proc in workloads.items():
+                    build_ref = (
+                        proc.get("build")
+                        if isinstance(proc, dict)
+                        else getattr(proc, "build", None)
+                    )
+                    image_ref = (
+                        proc.get("image")
+                        if isinstance(proc, dict)
+                        else getattr(proc, "image", None)
+                    )
+                    image_tag_ref = (
+                        proc.get("imageTag")
+                        if isinstance(proc, dict)
+                        else getattr(proc, "imageTag", None)
+                    )
+                    if not build_ref and not image_ref and not image_tag_ref:
                         warn(
                             f"{section[:-1]} {proc_name} has no 'build' field and no 'default' build exists; it will use chart.image"
                         )
@@ -977,12 +994,12 @@ def logs(
         raise BadParameter("cannot use --stern with --kibana")
 
     release_name = tell_release_name()
-    values = ctx.obj.get("values", {})
+    values = ctx.obj.get("values")
     proc_name = proc[0] if proc else None
     selector = None
-    deploy_names = set(values.get("deployments") or [])
-    cronjob_names = set(values.get("cronjobs") or [])
-    job_names = set(values.get("jobs") or [])
+    deploy_names = set(values.deployments or []) if values else set()
+    cronjob_names = set(values.cronjobs or []) if values else set()
+    job_names = set(values.jobs or []) if values else set()
 
     if proc_name in deploy_names:
         selector = f"app.kubernetes.io/instance={release_name}-{proc_name}"
@@ -1235,7 +1252,7 @@ def run_job_command(
         # 如果没有在任何 app 内运行 lain job, 则会用 lain 镜像启动一个容器
         ctx.obj["image"] = make_image_str(appname="lain", image_tag="latest")
         cc = tell_cluster_config()
-        jfs_mount_path = cc.get("jfs", "")
+        jfs_mount_path = getattr(cc, "jfs", "") if cc else ""
         if jfs_mount_path:
             ctx.obj["volumeMounts"] = [{"name": "jfs", "mountPath": jfs_mount_path}]
             ctx.obj["volumes"] = [
@@ -1251,7 +1268,7 @@ def run_job_command(
         # 如果发现是在 lain app 目录内运行 lain job, 就选取一个 deploy,
         # 拿出各种 spec 里的信息，来渲染 job.yaml
         if not deploy:
-            deploys = ctx.obj["values"]["deployments"]
+            deploys = ctx.obj["values"].deployments
             deploy = list(deploys.keys())[0]
         res = kubectl(
             "get", "deploy", f"{appname}-{deploy}", "-ojson", capture_output=True
@@ -1480,7 +1497,7 @@ def x(ctx: click.Context, deploy_and_command: tuple[str, ...]) -> None:
         # use -- to avoid click confusion on cli options
         lain x -- python3 manage.py foo --bar
     """
-    deploy_names = set(ctx.obj["values"]["deployments"])
+    deploy_names = set(ctx.obj["values"].deployments)
     if deploy_and_command:
         deploy, *cmd = deploy_and_command
         if deploy not in deploy_names:
@@ -1546,8 +1563,8 @@ def use(
 
     def tell_cluster_line(c, is_current=False):
         prechar = "*" if is_current else " "
-        cc = CLUSTERS.get(c) or {}
-        extra_docs = cc.get("extra_docs") or ""
+        cc = CLUSTERS.get(c)
+        extra_docs = cc.extra_docs if cc else ""
         if extra_docs:
             return f"{prechar} {c}, {extra_docs}"
         return f"{prechar} {c}"
@@ -1592,7 +1609,7 @@ def use(
     os.symlink(src, dest)
     cc = tell_cluster_config(cluster_name)
     if set_context:
-        ns = cc.get("namespace", "default")
+        ns = getattr(cc, "namespace", "default") if cc else "default"
         kubectl(
             "config",
             "set-context",
@@ -1603,7 +1620,7 @@ def use(
     else:
         kubectl_version_challenge(check=False)
 
-    if turn and cc.get("instance_ids"):
+    if turn and cc and getattr(cc, "instance_ids", None):
         echo("wait for cluster up...")
         lain_("admin", "turn", "on", exit=True)
 
@@ -1694,7 +1711,7 @@ def restart(ctx, procs_or_release_name, selectors, wait, graceful):
 def update_image(ctx: click.Context, procs: tuple[str, ...], deduce: bool) -> None:
     """update, and only update image for some proc"""
     values = ctx.obj["values"]
-    choices = set(values["procs"].keys())
+    choices = set(values.procs.keys())
     if not procs:
         error(f"specify at least one proc, choose from: {choices}", exit=1)
 
@@ -1723,7 +1740,7 @@ def update_image(ctx: click.Context, procs: tuple[str, ...], deduce: bool) -> No
 
     image = registry.make_image(image_tag)
     for proc in selected_procs:
-        resource_type = "deployment" if proc in values["deployments"] else "cronjob"
+        resource_type = "deployment" if proc in values.deployments else "cronjob"
         res = kubectl(
             "set",
             "image",
@@ -1992,7 +2009,7 @@ def deploy(ctx, pairs, delete_after, build, canary, wait):
         if appname != tell_release_name():
             error("do not use canary deploy while values are being overridden", exit=1)
 
-        ctx.obj["values"]["releaseName"] = canary_name
+        ctx.obj["values"].releaseName = canary_name
     elif helm_status(canary_name):
         error("cannot proceed due to on-going canary deploy", exit=1)
 
@@ -2060,7 +2077,7 @@ def deploy(ctx, pairs, delete_after, build, canary, wait):
         if age > deploy_duration:
             re_creation_headsup = True
 
-    tests = ctx.obj["values"].get("tests")
+    tests = ctx.obj["values"].tests
     if tests:
         lain_("wait")
         # sometimes test pods are cleaned up prematurely, and this command will fail
@@ -2240,7 +2257,9 @@ def delete(
         release_name = app_name
         ctx.obj["appname"] = app_name
 
-    persistentVolumeClaims = ctx.obj["values"].get("persistentVolumeClaims") or {}
+    persistentVolumeClaims = (
+        getattr(ctx.obj["values"], "persistentVolumeClaims", None) or {}
+    )
     for pvc in persistentVolumeClaims.values():
         sc_name = pvc["storageClassName"]
         if not storage_class_can_reattach(sc_name) and not force:
@@ -2417,14 +2436,24 @@ def run(
         raise BadParameter("cannot use --proc with --prepare")
     image: str
     if proc_name:
-        procs = ctx.obj["values"]["procs"]
+        procs = ctx.obj["values"].procs
         proc = procs[proc_name]
-        try:
-            image = proc["image"]
-        except KeyError:
-            image_tag = proc["imageTag"]
+        image_name = (
+            proc.get("image")
+            if isinstance(proc, dict)
+            else getattr(proc, "image", None)
+        )
+        if image_name is not None:
+            image = image_name
+        else:
+            image_tag = (
+                proc.get("imageTag")
+                if isinstance(proc, dict)
+                else getattr(proc, "imageTag", None)
+            )
+            assert image_tag is not None
             image = make_image_str(image_tag=image_tag)
-    if prepare:
+    elif prepare:
         image = make_image_str(image_tag="prepare")
     else:
         meta = lain_meta()
@@ -2555,7 +2584,7 @@ def push(ctx, images, pull, overwrite_latest, registry, build_name):
     """
     if not registry:
         cluster = ctx.obj["cluster"]
-        registry = CLUSTERS[cluster]["registry"]
+        registry = CLUSTERS[cluster].registry
 
     if images:
         for image in images:
@@ -2893,7 +2922,7 @@ def version(ctx, images_count):
 def image(ctx):
     tag = lain_meta()
     cc = tell_cluster_config()
-    registry_addr = cc["registry"]
+    registry_addr = getattr(cc, "registry")
     appname = ctx.obj["appname"]
     image_tag = f"{registry_addr}/{appname}:{tag}"
     echo(image_tag)

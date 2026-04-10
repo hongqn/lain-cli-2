@@ -7,6 +7,7 @@ import requests
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from lain_cli.lain import lain
+from lain_cli.schemas import ReleaseSchema
 from lain_cli.utils import (
     DEFAULT_WORKDIR,
     KUBECONFIG_DIR,
@@ -48,6 +49,8 @@ from tests.conftest import (
     tell_ing_name,
 )
 
+assert TEST_CLUSTER_CONFIG is not None
+
 
 @pytest.mark.first
 @pytest.mark.usefixtures("dummy_helm_chart")
@@ -57,18 +60,18 @@ def test_build(registry):
     def _prepare():
         obj = context().obj
         values = obj["values"]
-        build_clause = values["build"]
-        build_clause["prepare"]["env"] = {
+        build_clause = values.build
+        build_clause.prepare.env = {
             "prepare_env": BUILD_TREASURE_NAME,
             "escape_test": "space test & newline \n test",
         }
-        build_clause["prepare"]["keep"].extend(
+        build_clause.prepare.keep.extend(
             [
                 "foo/thing.txt",
                 "bar",
             ]
         )
-        build_clause["prepare"]["script"].extend(
+        build_clause.prepare.script.extend(
             [
                 f"echo {RANDOM_STRING} > {BUILD_TREASURE_NAME}",
                 "mkdir foo bar",
@@ -93,9 +96,9 @@ def test_build(registry):
     def _build_without_prepare():
         obj = context().obj
         values = obj["values"]
-        build_clause = values["build"]
-        build_clause["env"] = {"build_env": BUILD_TREASURE_NAME}
-        del build_clause["prepare"]
+        build_clause = values.build
+        build_clause.env = {"build_env": BUILD_TREASURE_NAME}
+        build_clause.prepare = None
         lain_build(stage=stage, push=False)
 
     run_under_click_context(_build_without_prepare)
@@ -111,8 +114,8 @@ def test_build(registry):
     def _build():
         obj = context().obj
         values = obj["values"]
-        build_clause = values["build"]
-        build_clause["script"].append(f"echo {RANDOM_STRING} >> {BUILD_TREASURE_NAME}")
+        build_clause = values.build
+        build_clause.script.append(f"echo {RANDOM_STRING} >> {BUILD_TREASURE_NAME}")
         lain_build(stage=stage)
 
     run_under_click_context(_build)
@@ -138,16 +141,18 @@ def test_build(registry):
     def _release():
         obj = context().obj
         values = obj["values"]
-        values["release"] = {
-            "env": {"release_env": BUILD_TREASURE_NAME},
-            "dest_base": "python:latest",
-            "workdir": DEFAULT_WORKDIR,
-            "script": [],
-            "copy": [
-                {"src": "/lain/app/treasure.txt", "dest": "/lain/app/treasure.txt"},
-                {"src": "/lain/app/treasure.txt", "dest": "/etc"},
-            ],
-        }
+        values.release = ReleaseSchema.model_validate(
+            {
+                "env": {"release_env": BUILD_TREASURE_NAME},
+                "dest_base": "python:latest",
+                "workdir": DEFAULT_WORKDIR,
+                "script": [],
+                "copy": [
+                    {"src": "/lain/app/treasure.txt", "dest": "/lain/app/treasure.txt"},
+                    {"src": "/lain/app/treasure.txt", "dest": "/etc"},
+                ],
+            }
+        )
         lain_build(stage=stage, push=False)
 
     run_under_click_context(_release)
@@ -290,9 +295,9 @@ def test_workflow(registry):
         helm_values = ctx.obj["values"]
         return helm_values
 
-    # check if values-[TEST_CLUSTER].yaml currectly overrides helm context
+    # check if values-[TEST_CLUSTER].yaml correctly overrides helm context
     _, helm_values = run_under_click_context(get_helm_values)
-    assert helm_values["deployments"]["web-dev"]["replicaCount"] == overrideReplicaCount
+    assert helm_values.deployments["web-dev"].replicaCount == overrideReplicaCount
 
     # deploy again to create newly added ingress rule
     run(lain, args=["deploy", "--set", f"imageTag={DUMMY_IMAGE_TAG}"])
@@ -306,7 +311,7 @@ def test_workflow(registry):
         capture_output=True,
     )
     assert not res.returncode
-    domain = TEST_CLUSTER_CONFIG["domain"]
+    domain = TEST_CLUSTER_CONFIG.domain
     assert set(res.stdout.decode("utf-8").split()) == {
         tell_ing_name(full_host, DUMMY_APPNAME, domain, "web"),
         tell_ing_name(DUMMY_APPNAME, DUMMY_APPNAME, domain, "web"),
@@ -326,8 +331,8 @@ def test_workflow(registry):
     assert dummy_dev_resp["env"]["FOO"] == "BAR"
     assert dummy_dev_resp["env"]["SCALE"] == "BANANA"
     assert dummy_dev_resp["env"]["LAIN_CLUSTER"] == TEST_CLUSTER
-    assert dummy_dev_resp["env"]["K8S_NAMESPACE"] == TEST_CLUSTER_CONFIG.get(
-        "namespace", "default"
+    assert dummy_dev_resp["env"]["K8S_NAMESPACE"] == getattr(
+        TEST_CLUSTER_CONFIG, "namespace", "default"
     )
     assert dummy_dev_resp["env"]["IMAGE_TAG"] == DUMMY_IMAGE_TAG
     # check if replicaCount is correctly overridden
@@ -436,6 +441,7 @@ def test_override_release_name():
     run(lain, args=override_args + ["deploy"])
     status_dic = helm_status(DUMMY_OVERRIDE_RELEASE_NAME)
     # helm release name should be correctly overridden
+    assert status_dic is not None
     assert status_dic["name"] == DUMMY_OVERRIDE_RELEASE_NAME
     # deploy a 'normal' version, to assure two releases do not interfere
     run(lain, args=["deploy", "--wait"])
@@ -461,7 +467,9 @@ def test_override_release_name():
     run(lain, args=override_args + ["delete"])
     # overridden release is deleted, but the 'normal' app remains intact
     assert not helm_status(DUMMY_OVERRIDE_RELEASE_NAME)
-    assert helm_status(DUMMY_APPNAME)["name"] == DUMMY_APPNAME
+    status_dic = helm_status(DUMMY_APPNAME)
+    assert status_dic is not None
+    assert status_dic["name"] == DUMMY_APPNAME
 
 
 @pytest.mark.run(after="test_override_release_name")

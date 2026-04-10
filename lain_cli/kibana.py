@@ -15,7 +15,7 @@ class Kibana(RequestClientMixin):
 
     def __init__(self) -> None:
         cc = tell_cluster_config()
-        kibana_host = cc.get("kibana")
+        kibana_host = getattr(cc, "kibana", None) if cc is not None else None
         if not kibana_host:
             error("kibana not configured for this cluster", exit=1)
 

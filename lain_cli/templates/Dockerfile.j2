@@ -16,6 +16,7 @@ RUN find . -type f {% if bc.prepare.keep %}{% for k in bc.prepare.keep %}{% if n
 {% endif %}
 
 {% set release = bc.release | default(values.release | default(None)) %}
+{% set release_copy = release['copy'] if release is mapping else release.copy_ %}
 {% if from_build_image %}
 FROM {{ from_build_image }} AS build
 {% elif shared_prepare_repo %}
@@ -46,7 +47,7 @@ WORKDIR {{ release.workdir }}
 ENV LAIN_META={{ lain_meta }}
 {% endif %}
 
-{% for copy in release['copy'] %}
+{% for copy in release_copy %}
 COPY --chown=1001:1001 --from=build {{ copy.src }} {{ copy.dest }}
 {% endfor %}
 

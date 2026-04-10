@@ -8,7 +8,7 @@ from lain_cli.utils import error, must_get_env, tell_cluster_config, warn
 
 def tell_scm() -> "GitLabSCM":
     cc = tell_cluster_config()
-    endpoint = cc.get("gitlab")
+    endpoint = getattr(cc, "gitlab", None) if cc is not None else None
     if not endpoint:
         error("gitlab not configured in cluster config", exit=1)
 
