@@ -23,14 +23,18 @@ class AliyunRegistry(RegistryUtils):
     ) -> None:
         if not all([access_key_id, access_key_secret, registry]):
             cc = tell_cluster_config()
-            access_key_id = cc.get("access_key_id")
-            access_key_secret = cc.get("access_key_secret")
+            access_key_id = (
+                getattr(cc, "access_key_id", None) if cc is not None else None
+            )
+            access_key_secret = (
+                getattr(cc, "access_key_secret", None) if cc is not None else None
+            )
             if not all([access_key_id, access_key_secret]):
                 raise ValueError(
                     "access_key_id, access_key_secret not provided in cluster config"
                 )
             if not registry:
-                registry = cc["registry"]
+                registry = getattr(cc, "registry") if cc is not None else None
 
         assert registry is not None
         _, region_id, _, _, repo_namespace = re.split(r"[\./]", registry)

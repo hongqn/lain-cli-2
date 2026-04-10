@@ -19,10 +19,10 @@ class HarborRegistry(RequestClientMixin, RegistryUtils):
     ) -> None:
         if not all([registry, harbor_token]):
             cc = tell_cluster_config()
-            registry = cc["registry"]
-            if "harbor_token" not in cc:
+            registry = getattr(cc, "registry") if cc is not None else None
+            harbor_token = getattr(cc, "harbor_token", None) if cc is not None else None
+            if not harbor_token:
                 raise ValueError("harbor_token not provided in cluster config")
-            harbor_token = cc["harbor_token"]
 
         assert registry is not None
         assert harbor_token is not None

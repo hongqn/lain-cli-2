@@ -4,7 +4,8 @@ from os import chdir, environ, getcwd
 from os.path import abspath, dirname, join
 from random import choice
 from string import ascii_letters
-from typing import Any, Tuple
+from typing import Any
+from click.testing import Result
 
 import click
 import pytest
@@ -44,7 +45,7 @@ with change_dir(DUMMY_REPO):
 TEST_CLUSTER = "test"
 
 
-def run(*args, returncode=0, obj=None, mix_stderr=True, **kwargs):
+def run(*args, returncode: int | None = 0, obj=None, mix_stderr=True, **kwargs):
     """run cli command in a click context"""
     runner = CliRunner(mix_stderr=mix_stderr)
     env = environ.copy()
@@ -54,7 +55,8 @@ def run(*args, returncode=0, obj=None, mix_stderr=True, **kwargs):
         real_code = rc(res)
         if real_code != returncode:
             print(res.output)
-            traceback.print_exception(*res.exc_info)
+            if res.exc_info is not None:
+                traceback.print_exception(*res.exc_info)
 
         assert real_code == returncode
 
@@ -65,11 +67,12 @@ run(lain, args=["use", TEST_CLUSTER])
 
 with click.Context(click.Command("lain"), obj={}):
     TEST_CLUSTER_CONFIG = tell_cluster_config(TEST_CLUSTER)
+assert TEST_CLUSTER_CONFIG is not None
 
-DUMMY_URL = f"http://{DUMMY_APPNAME}.{TEST_CLUSTER_CONFIG['domain']}"
-DUMMY_URL_HTTPS = f"https://{DUMMY_APPNAME}.{TEST_CLUSTER_CONFIG['domain']}"
+DUMMY_URL = f"http://{DUMMY_APPNAME}.{TEST_CLUSTER_CONFIG.domain}"
+DUMMY_URL_HTTPS = f"https://{DUMMY_APPNAME}.{TEST_CLUSTER_CONFIG.domain}"
 # this url will point to proc.web-dev in example_lain_yaml
-DUMMY_DEV_URL = f"http://{DUMMY_APPNAME}-dev.{TEST_CLUSTER_CONFIG['domain']}"
+DUMMY_DEV_URL = f"http://{DUMMY_APPNAME}-dev.{TEST_CLUSTER_CONFIG.domain}"
 RANDOM_STRING = "".join([choice(ascii_letters) for n in range(9)])
 BUILD_TREASURE_NAME = "treasure.txt"
 DUMMY_JOBS_CLAUSE = {
@@ -86,7 +89,7 @@ DUMMY_JOBS_CLAUSE = {
 }
 DUMMY_TESTS_CLAUSE = {
     "simple-test": {
-        "image": f"{TEST_CLUSTER_CONFIG['registry']}/lain:latest",
+        "image": f"{getattr(TEST_CLUSTER_CONFIG, 'registry')}/lain:latest",
         "command": [
             "bash",
             "-ec",
@@ -136,7 +139,7 @@ def tell_deployed_images(appname):
 
 def run_under_click_context(
     f, args=(), returncode=0, obj=None, kwargs=None
-) -> Tuple[click.testing.Result, Any]:
+) -> tuple[Result, Any]:
     """to test functions that use click context internally, we must invoke them
     under a active click context, and the only way to do that currently is to
     wrap the function call in a click command"""
@@ -161,7 +164,8 @@ def run_under_click_context(
         real_code = rc(res)
         if real_code != returncode:
             print(res.output)
-            traceback.print_exception(*res.exc_info)
+            if res.exc_info is not None:
+                traceback.print_exception(*res.exc_info)
 
         assert real_code == returncode
 
@@ -246,7 +250,7 @@ def dummy(request):
 
 @pytest.fixture()
 def registry(request):
-    cc = dict(CLUSTERS[TEST_CLUSTER])
+    cc = CLUSTERS[TEST_CLUSTER]
     return tell_registry_client(cc)
 
 

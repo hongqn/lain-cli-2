@@ -34,9 +34,13 @@ class TencentClient(RegistryUtils):
     ) -> None:
         if not all([registry, access_key_id, access_key_secret]):
             cc = tell_cluster_config()
-            registry = cc["registry"]
-            access_key_id = cc.get("access_key_id")
-            access_key_secret = cc.get("access_key_secret")
+            registry = getattr(cc, "registry") if cc is not None else None
+            access_key_id = (
+                getattr(cc, "access_key_id", None) if cc is not None else None
+            )
+            access_key_secret = (
+                getattr(cc, "access_key_secret", None) if cc is not None else None
+            )
 
         assert registry is not None
         self.registry = registry
@@ -95,7 +99,8 @@ class TencentClient(RegistryUtils):
         state: str = "on",
     ) -> None:
         if not InstanceIds:
-            InstanceIds = tell_cluster_config(cluster).get("instance_ids")
+            cc = tell_cluster_config(cluster)
+            InstanceIds = getattr(cc, "instance_ids", None) if cc is not None else None
 
         if not InstanceIds:
             warn("instance_ids not defined in cluster info, cannot proceed", exit=1)

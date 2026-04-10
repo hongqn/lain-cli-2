@@ -18,7 +18,7 @@ to tail logs:
     {%- endif %}
     {%- endfor %}
 
-{%- if 'cronjobs' in values and values.cronjobs %}
+{%- if values.cronjobs %}
 to test your cronjob:
     {%- for job_name in values.cronjobs.keys() %}
     lain create-job {{ job_name }}

@@ -28,16 +28,19 @@ class Prometheus(RequestClientMixin):
     def __init__(self, endpoint: str | None = None) -> None:
         if not endpoint:
             cc = tell_cluster_config()
-            endpoint = cc.get("prometheus")
+            endpoint = getattr(cc, "prometheus", None) if cc is not None else None
             if not endpoint:
                 raise click.Abort(f"prometheus not provided in cluster config: {cc}")
 
         ctx = context(silent=True)
-        self.query_range = (
-            ctx.obj.get("values", {}).get("prometheus_query_range", "7d")
-            if ctx
-            else "7d"
-        )
+        if ctx:
+            values = ctx.obj.get("values")
+            if isinstance(values, dict):
+                self.query_range = values.get("prometheus_query_range", "7d")
+            else:
+                self.query_range = getattr(values, "prometheus_query_range", "7d")
+        else:
+            self.query_range = "7d"
         self.query_step = int(int(parse_timespan(self.query_range)) / 1440)
         self.endpoint = endpoint
 
@@ -51,7 +54,7 @@ class Prometheus(RequestClientMixin):
         self, appname: str, proc_name: str, **kwargs: Any
     ) -> PrometheusResult:
         cc = tell_cluster_config()
-        query_template = cc.get("pql_template", {}).get("cpu")
+        query_template = (getattr(cc, "pql_template", None) or {}).get("cpu")
         if not query_template:
             raise ValueError("pql_template.cpu not configured in cluster config")
         q = query_template.format(
@@ -85,7 +88,9 @@ class Prometheus(RequestClientMixin):
         self, appname: str, proc_name: str, **kwargs: Any
     ) -> int | None:
         cc = tell_cluster_config()
-        query_template = cc.get("pql_template", {}).get("memory_quantile")
+        query_template = (getattr(cc, "pql_template", None) or {}).get(
+            "memory_quantile"
+        )
         if not query_template:
             raise ValueError(
                 "pql_template.memory_quantile not configured in cluster config"
@@ -163,7 +168,7 @@ class Alertmanager(RequestClientMixin):
     def __init__(self, endpoint: str | None = None) -> None:
         if not endpoint:
             cc = tell_cluster_config()
-            endpoint = cc.get("alertmanager")
+            endpoint = getattr(cc, "alertmanager", None) if cc is not None else None
             if not endpoint:
                 raise click.Abort(f"alertmanager not provided in cluster config: {cc}")
 
