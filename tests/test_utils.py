@@ -10,9 +10,9 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 
 from lain_cli.aliyun import AliyunRegistry
 from lain_cli.harbor import HarborRegistry
+from lain_cli.schemas import ClusterConfigSchema
 from lain_cli.utils import (
     CLUSTER_VALUES_DIR,
-    ClusterConfigSchema,
     DOCKERIGNORE_NAME,
     banyun,
     change_dir,

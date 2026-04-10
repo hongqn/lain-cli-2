@@ -38,6 +38,7 @@ from lain_cli.prompt import (
     pod_text,
     top_text,
 )
+from lain_cli.schemas import ClusterConfigSchema
 from lain_cli.scm import tell_scm
 from lain_cli.tencent import TencentClient
 from lain_cli.utils import (
@@ -52,7 +53,6 @@ from lain_cli.utils import (
     HELM_STUCK_STATE,
     KUBECONFIG_DIR,
     RECENT_TAGS_COUNT,
-    ClusterConfigSchema,
     KVPairType,
     banyun,
     brief,

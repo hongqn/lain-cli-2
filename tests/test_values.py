@@ -3,9 +3,8 @@ from os.path import join
 import pytest
 from pydantic import ValidationError
 
+from lain_cli.schemas import HelmValuesSchema, IngressSchema
 from lain_cli.utils import (
-    HelmValuesSchema,
-    IngressSchema,
     load_helm_values,
     make_wildcard_domain,
     tell_domain_tls_name,
