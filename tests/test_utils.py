@@ -1,4 +1,6 @@
+import json
 import shutil
+import subprocess
 from os.path import basename, exists, join
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
@@ -78,6 +80,7 @@ def test_ya():
     multiline_content = {"so": LiteralScalarString("so\nlong")}
     s = yadu(multiline_content)
     # should dump multiline string in readable format
+    assert s is not None
     assert ": |" in s
 
 
@@ -380,8 +383,6 @@ def test_job_deploy_selection():
 
 def _setup_interactive_job_mocks(mocker, exec_side_effect=None, exec_returncode=0):
     """common mock setup for interactive job tests."""
-    import subprocess
-
     mock_kubectl = mocker.patch("lain_cli.lain.kubectl")
     mock_cleanup = mocker.patch("lain_cli.lain.try_to_cleanup_job")
     mocker.patch("lain_cli.lain.kubectl_apply")
@@ -391,6 +392,8 @@ def _setup_interactive_job_mocks(mocker, exec_side_effect=None, exec_returncode=
     if exec_side_effect:
 
         def kubectl_side_effect(*args, **kwargs):
+            if args[:2] == ("get", "job"):
+                return subprocess.CompletedProcess(args, 1, stdout=b"", stderr=b"")
             if args[:2] == ("exec", "-it"):
                 raise exec_side_effect
 
@@ -398,6 +401,8 @@ def _setup_interactive_job_mocks(mocker, exec_side_effect=None, exec_returncode=
     else:
 
         def kubectl_return(*args, **kwargs):
+            if args[:2] == ("get", "job"):
+                return subprocess.CompletedProcess(args, 1, stdout=b"", stderr=b"")
             if args[:2] == ("exec", "-it"):
                 return subprocess.CompletedProcess(args, exec_returncode)
 
@@ -414,24 +419,27 @@ def test_interactive_job_cleanup_on_normal_exit(mocker):
     from lain_cli.lain import lain
 
     runner = CliRunner(mix_stderr=False)
-    runner.invoke(lain, ["job", "-i", "--force", "bash"], catch_exceptions=True)
+    runner.invoke(lain, ["job", "-i", "bash"], obj={}, catch_exceptions=True)
     mock_cleanup.assert_called_once()
 
 
 def test_interactive_job_no_cleanup_on_nonzero_exit(mocker):
     """lain job -i, exit 1 must NOT clean up and must propagate exit code."""
     _, mock_cleanup = _setup_interactive_job_mocks(mocker, exec_returncode=1)
+    mocker.patch(
+        "lain_cli.lain.tell_interactive_job_exit_message",
+        return_value="reattach me",
+    )
 
     from click.testing import CliRunner
 
     from lain_cli.lain import lain
 
     runner = CliRunner(mix_stderr=False)
-    result = runner.invoke(
-        lain, ["job", "-i", "--force", "bash"], catch_exceptions=True
-    )
+    result = runner.invoke(lain, ["job", "-i", "bash"], obj={}, catch_exceptions=True)
     mock_cleanup.assert_not_called()
     assert result.exit_code == 1
+    assert "reattach me" in result.output
 
 
 def test_interactive_job_no_cleanup_on_ctrl_c(mocker):
@@ -439,14 +447,152 @@ def test_interactive_job_no_cleanup_on_ctrl_c(mocker):
     _, mock_cleanup = _setup_interactive_job_mocks(
         mocker, exec_side_effect=KeyboardInterrupt()
     )
+    mocker.patch(
+        "lain_cli.lain.tell_interactive_job_exit_message",
+        return_value="still running",
+    )
 
     from click.testing import CliRunner
 
     from lain_cli.lain import lain
 
     runner = CliRunner(mix_stderr=False)
-    result = runner.invoke(
-        lain, ["job", "-i", "--force", "bash"], catch_exceptions=True
-    )
+    result = runner.invoke(lain, ["job", "-i", "bash"], obj={}, catch_exceptions=True)
     mock_cleanup.assert_not_called()
     assert result.exit_code == 130
+    assert "still running" in result.output
+
+
+def test_tell_interactive_job_exit_message_for_running_pod(mocker):
+    mocker.patch("lain_cli.lain.pick_job_pod", return_value="running-pod")
+
+    from lain_cli.lain import tell_interactive_job_exit_message
+
+    message = tell_interactive_job_exit_message("dummy", "dummy-job", ("bash",))
+
+    assert message == (
+        "job dummy-job is still running, you can re-attach with:\n"
+        " k exec -it running-pod -- bash"
+    )
+
+
+def test_tell_interactive_job_exit_message_for_failed_pod(mocker):
+    mocker.patch("lain_cli.lain.pick_job_pod", return_value=None)
+    mocker.patch("lain_cli.lain.pick_pod", return_value="failed-pod")
+
+    def fake_kubectl(*args, **kwargs):
+        if args == ("get", "po", "failed-pod", "-o=json"):
+            payload = {
+                "status": {
+                    "phase": "Failed",
+                    "containerStatuses": [
+                        {
+                            "state": {
+                                "terminated": {
+                                    "reason": "OOMKilled",
+                                    "exitCode": 137,
+                                }
+                            }
+                        }
+                    ],
+                }
+            }
+            return subprocess.CompletedProcess(
+                args, 0, stdout=json.dumps(payload).encode(), stderr=b""
+            )
+        if args == (
+            "get",
+            "events",
+            "-o=json",
+            "--field-selector=involvedObject.kind=Pod,involvedObject.name=failed-pod",
+        ):
+            payload = {
+                "items": [
+                    {
+                        "reason": "Killing",
+                        "message": "Stopping container dummy-job",
+                        "metadata": {
+                            "creationTimestamp": "2026-04-09T00:00:00Z",
+                        },
+                    }
+                ]
+            }
+            return subprocess.CompletedProcess(
+                args, 0, stdout=json.dumps(payload).encode(), stderr=b""
+            )
+        if args == (
+            "get",
+            "events",
+            "-o=json",
+            "--field-selector=involvedObject.kind=Job,involvedObject.name=dummy-job",
+        ):
+            payload = {
+                "items": [
+                    {
+                        "reason": "BackoffLimitExceeded",
+                        "message": "Job has reached the specified backoff limit",
+                        "metadata": {
+                            "creationTimestamp": "2026-04-09T00:00:01Z",
+                        },
+                    }
+                ]
+            }
+            return subprocess.CompletedProcess(
+                args, 0, stdout=json.dumps(payload).encode(), stderr=b""
+            )
+        raise AssertionError(f"unexpected kubectl call: {args}")
+
+    mocker.patch("lain_cli.lain.kubectl", side_effect=fake_kubectl)
+
+    from lain_cli.lain import tell_interactive_job_exit_message
+
+    message = tell_interactive_job_exit_message("dummy", "dummy-job", ("bash",))
+
+    assert "job dummy-job is no longer re-attachable." in message
+    assert "pod failed-pod is Failed (OOMKilled, exit code 137)" in message
+    assert "latest pod event: Killing: Stopping container dummy-job" in message
+    assert (
+        "latest job event: BackoffLimitExceeded: Job has reached the specified backoff limit"
+        in message
+    )
+
+
+def test_tell_interactive_job_exit_message_when_job_pod_is_missing(mocker):
+    mocker.patch("lain_cli.lain.pick_job_pod", return_value=None)
+    mocker.patch("lain_cli.lain.pick_pod", return_value=None)
+
+    def fake_kubectl(*args, **kwargs):
+        if args == (
+            "get",
+            "events",
+            "-o=json",
+            "--field-selector=involvedObject.kind=Job,involvedObject.name=dummy-job",
+        ):
+            payload = {
+                "items": [
+                    {
+                        "reason": "BackoffLimitExceeded",
+                        "message": "Job has reached the specified backoff limit",
+                        "metadata": {
+                            "creationTimestamp": "2026-04-09T00:00:01Z",
+                        },
+                    }
+                ]
+            }
+            return subprocess.CompletedProcess(
+                args, 0, stdout=json.dumps(payload).encode(), stderr=b""
+            )
+        raise AssertionError(f"unexpected kubectl call: {args}")
+
+    mocker.patch("lain_cli.lain.kubectl", side_effect=fake_kubectl)
+
+    from lain_cli.lain import tell_interactive_job_exit_message
+
+    message = tell_interactive_job_exit_message("dummy", "dummy-job", ("bash",))
+
+    assert "job dummy-job is no longer re-attachable." in message
+    assert "no running pod found for this job" in message
+    assert (
+        "latest job event: BackoffLimitExceeded: Job has reached the specified backoff limit"
+        in message
+    )
