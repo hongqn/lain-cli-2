@@ -1142,7 +1142,26 @@ def tell_builds():
     if has_build and has_builds:
         error("cannot define both 'build' and 'builds' in values.yaml", exit=1)
     if has_builds:
-        return dict(getattr(values, "builds"))
+        from pydantic.fields import PydanticUndefined
+
+        from lain_cli.schemas import BuildSchema
+
+        result = {}
+        for name, bc in getattr(values, "builds").items():
+            bc = dict(bc)
+            # Apply BuildSchema defaults for fields that have defaults
+            for field_name, field_info in BuildSchema.model_fields.items():
+                if field_name in bc:
+                    continue
+                if field_info.default_factory is not None:
+                    bc[field_name] = field_info.default_factory()
+                elif (
+                    field_info.default is not PydanticUndefined
+                    and field_info.default is not None
+                ):
+                    bc[field_name] = field_info.default
+            result[name] = bc
+        return result
     if has_build:
         build_clause = values.build.model_dump(
             mode="python", by_alias=True, exclude_none=True
