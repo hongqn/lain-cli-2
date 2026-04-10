@@ -6,6 +6,7 @@ import pytest
 
 from lain_cli.utils import (
     DEFAULT_BUILD_NAME,
+    DEFAULT_WORKDIR,
     context,
     make_image_str,
     tell_build_deps,
@@ -716,3 +717,26 @@ def test_image_repos_no_build():
     yadu(values, DUMMY_VALUES_PATH)
     res = run(lain, args=["image-repos"])
     assert DUMMY_APPNAME in res.output.strip()
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_builds_plural_applies_schema_defaults():
+    """builds: (plural) should apply BuildSchema defaults like workdir."""
+    values = load_dummy_values()
+    del values["build"]
+    # Omit workdir — BuildSchema should default it to /lain/app
+    values["builds"] = {
+        "default": {"base": "python:3.12", "script": ["echo ok"]},
+        "gpu": {"base": "nvidia/cuda:12.6", "script": ["echo gpu"]},
+    }
+    yadu(values, DUMMY_VALUES_PATH)
+
+    def check_defaults():
+        builds = tell_builds()
+        for name, bc in builds.items():
+            assert bc.get("workdir") == DEFAULT_WORKDIR, (
+                f"build '{name}' missing workdir default"
+            )
+            assert bc.get("script") is not None
+
+    run_under_click_context(check_defaults)
