@@ -8,7 +8,7 @@ from copy import deepcopy
 from os import getcwd as cwd
 from os.path import basename, dirname, exists, expanduser, isfile, join
 from time import sleep, time
-from typing import Any, cast
+from typing import Any
 
 import click
 import requests
@@ -519,8 +519,7 @@ def list_waste():
 @click.pass_context
 def migrate_registry(ctx: click.Context, cc_path: str) -> None:
     data = yalo(cc_path)
-    schema = ClusterConfigSchema(context={"is_current": True})
-    cc = cast(dict[str, Any], schema.load(data))
+    cc = ClusterConfigSchema.load(data, context={"is_current": True})
     registry_addr = cc["registry"]
     dest_registry = tell_registry_client(cc)
     if not dest_registry:

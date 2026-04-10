@@ -1,7 +1,7 @@
 from os.path import join
 
 import pytest
-from marshmallow import ValidationError
+from pydantic import ValidationError
 
 from lain_cli.utils import (
     HelmValuesSchema,
@@ -175,7 +175,7 @@ def test_duplicate_proc_names():
     del web["resources"]
     values["cronjobs"] = {"web": web}
     with pytest.raises(ValidationError) as e:
-        HelmValuesSchema().load(values)
+        HelmValuesSchema.load(values)
 
     assert "proc names should not duplicate" in str(e)
 
@@ -187,7 +187,14 @@ def test_reserved_words():
     web_proc = bare_values["deployments"]["web"]
     bare_values["deployments"] = {"cronjobs": web_proc}
     with pytest.raises(ValidationError) as e:
-        HelmValuesSchema().load(bare_values)
+        HelmValuesSchema.load(bare_values)
+
+    assert "this is a reserved word" in str(e)
+
+    bare_values = load_dummy_values()
+    bare_values["deployments"] = {"copy": web_proc}
+    with pytest.raises(ValidationError) as e:
+        HelmValuesSchema.load(bare_values)
 
     assert "this is a reserved word" in str(e)
 
@@ -198,23 +205,34 @@ def test_schemas():
     web_proc = bare_values["deployments"]["web"]
     # deploy is an alias for deployments
     bare_values["deploy"] = {"web": web_proc, "another": web_proc}
+    bare_values["job"] = {"single": {"command": ["echo", "nothing"]}}
+    bare_values["ing"] = [{"host": "dummy", "deployName": "web", "paths": ["/"]}]
     yadu(bare_values, DUMMY_VALUES_PATH)
     _, values = run_under_click_context(load_helm_values, (DUMMY_VALUES_PATH,))
     assert values["deployments"]["web"] == values["deployments"]["another"]
+    assert values["jobs"]["single"] == {"command": ["echo", "nothing"]}
+    assert {"host": "dummy", "deployName": "web", "paths": ["/"]} in values["ingresses"]
     assert values["cronjobs"] == {}
     build = values["build"]
     assert build["prepare"]["keep"] == [f"./{BUILD_TREASURE_NAME}"]
 
     bare_values["volumeMounts"][0]["subPath"] = "foo/bar"  # should be basename
     with pytest.raises(ValidationError) as e:
-        HelmValuesSchema().load(bare_values)
+        HelmValuesSchema.load(bare_values)
 
     assert "subPath should be" in str(e)
 
+    bare_values = load_dummy_values()
+    bare_values["deployments"]["web"]["command"] = []
+    with pytest.raises(ValidationError) as e:
+        HelmValuesSchema.load(bare_values)
+
+    assert "command should not be empty" in str(e)
+
     false_ing = {"host": "dummy", "deployName": "web"}
     with pytest.raises(ValidationError):
-        IngressSchema().load(false_ing)
+        IngressSchema.load(false_ing)
 
     bad_web = {"containerPort": 8000}
     with pytest.raises(ValidationError):
-        IngressSchema().load(bad_web)
+        IngressSchema.load(bad_web)

@@ -42,16 +42,21 @@ from humanfriendly import (
 )
 from humanfriendly.text import tokenize
 from jinja2 import Environment, FileSystemLoader
-from marshmallow import INCLUDE, Schema, ValidationError, post_load, validates
-from marshmallow.fields import Dict, Field, Function, Int, List, Nested, Raw, Str
-from marshmallow.schema import SchemaMeta
-from marshmallow.validate import NoneOf, OneOf
 from packaging import version
 from pip._internal.index.collector import LinkCollector
 from pip._internal.index.package_finder import PackageFinder
 from pip._internal.models.search_scope import SearchScope
 from pip._internal.models.selection_prefs import SelectionPreferences
 from pip._internal.network.session import PipSession
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field as PydanticField,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from requests.exceptions import RequestException
 from ruamel.yaml import YAML
 from ruamel.yaml.parser import ParserError
@@ -553,7 +558,7 @@ def storage_class_can_reattach(sc_name):
 def update_canary_annotations(release_name, canary_group_name=None):
     """when calling with empty canary_group_name, will set canary-weight to 0%"""
     ctx = context()
-    canary_groups = ctx.obj["values"]["canaryGroups"]
+    canary_groups = ctx.obj["values"].get("canaryGroups")
     if not canary_groups:
         error("canaryGroups not defined in values", exit=1)
 
@@ -2440,48 +2445,82 @@ def brief(s):
 RESERVED_WORDS = set()
 
 
-class ReserveWord(SchemaMeta):
-    """collect reserved words"""
-
-    def __new__(mcs, name, bases, attrs):
-        for fname, field in attrs.items():
-            if isinstance(field, Field):
-                RESERVED_WORDS.add(fname)
-
-        return super().__new__(mcs, name, bases, attrs)
+def validate_reserved_word(value: str) -> str:
+    if value in RESERVED_WORDS:
+        raise ValueError("this is a reserved word, please change")
+    return value
 
 
-ReservedWord = NoneOf(RESERVED_WORDS, error="this is a reserved word, please change")
+def validate_reserved_word_mapping_keys(value: Any) -> Any:
+    if value is None:
+        return value
+    for key in value:
+        validate_reserved_word(key)
+    return value
 
 
-class LenientSchema(Schema, metaclass=ReserveWord):
-    class Meta(Schema.Meta):
-        unknown = INCLUDE
+def validate_canary_group_annotations(value: Any) -> Any:
+    if value is None:
+        return value
+    for annotations in value.values():
+        for key in annotations:
+            if key not in INGRESS_CANARY_ANNOTATIONS:
+                raise ValueError(f"{key} is not a valid ingress canary annotation")
+    return value
+
+
+class SchemaModel(BaseModel):
+    @classmethod
+    def load(
+        cls, data: Any, *, context: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        model = cls.model_validate(data, context=context)
+        return cast(
+            dict[str, Any],
+            model.model_dump(mode="python", by_alias=True, exclude_none=True),
+        )
+
+    def ensure_model_extra(self) -> dict[str, Any]:
+        extra = self.model_extra
+        if extra is None:
+            extra = {}
+            object.__setattr__(self, "__pydantic_extra__", extra)
+        return extra
+
+
+class LenientSchema(SchemaModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class StrictSchema(SchemaModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class PrepareSchema(LenientSchema):
-    script = List(Str, required=True)
-    keep = List(Str, load_default=[])
+    script: list[str]
+    keep: list[str] = PydanticField(default_factory=list)
 
-    @post_load
-    def finalize(self, data, **kwargs):
-        keep = data.setdefault("keep", [])
-        for i, k in enumerate(keep):
+    @field_validator("keep")
+    @classmethod
+    def finalize_keep(cls, keep: list[str]) -> list[str]:
+        new_keep = []
+        for k in keep:
             if "*" in k:
-                raise ValidationError(f'keep item should not contain "*", got: {k}')
+                raise ValueError(f'keep item should not contain "*", got: {k}')
             if k.startswith("/"):
-                raise ValidationError(f"keep item should not be abs path, got: {k}")
+                raise ValueError(f"keep item should not be abs path, got: {k}")
             if not k.startswith("./"):
-                keep[i] = f"./{k}"
+                k = f"./{k}"
+            new_keep.append(k)
 
-        return data
+        return new_keep
 
 
 class BuildSchema(LenientSchema):
-    base = Str(required=True)
-    prepare = Nested(PrepareSchema, required=False, allow_none=True)
-    script = List(Str, load_default=[])
-    workdir = Str(load_default=DEFAULT_WORKDIR, allow_none=False)
+    base: str
+    prepare: PrepareSchema | None = None
+    script: list[str] = PydanticField(default_factory=list)
+    workdir: str = DEFAULT_WORKDIR
 
 
 def parse_copy(stuff):
@@ -2497,92 +2536,109 @@ def parse_copy(stuff):
         return {"src": stuff, "dest": stuff}
     if isinstance(stuff, dict):
         if "src" not in stuff:
-            raise ValidationError("if copy clause is a dict, it must contain src")
+            raise ValueError("if copy clause is a dict, it must contain src")
         if "dest" not in stuff:
             stuff["dest"] = stuff["src"]
 
         return stuff
-    raise ValidationError(f"copy clause must be str or dict, got {stuff}")
+    raise ValueError(f"copy clause must be str or dict, got {stuff}")
 
 
 class ReleaseSchema(LenientSchema):
-    script = List(Str, load_default=[])
-    workdir = Str(load_default=DEFAULT_WORKDIR)
-    dest_base = Str()
-    copy = List(Function(deserialize=parse_copy), load_default=[])
+    script: list[str] = PydanticField(default_factory=list)
+    workdir: str = DEFAULT_WORKDIR
+    dest_base: str | None = None
+    copy_: list[dict[str, str]] = PydanticField(default_factory=list, alias="copy")
+
+    @field_validator("copy_", mode="before")
+    @classmethod
+    def parse_copy_items(cls, value: Any) -> list[dict[str, str]]:
+        if value is None:
+            return []
+        return [parse_copy(item) for item in value]
 
 
 class VolumeMountSchema(LenientSchema):
-    mountPath = Str(required=True)
-    subPath = Str(required=False)
+    mountPath: str
+    subPath: str | None = None
 
-    @validates("subPath")
-    def validate_subPath(self, value):
+    @field_validator("subPath")
+    @classmethod
+    def validate_sub_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         bn = basename(value)
         if bn != value:
-            raise ValidationError(f"subPath should be {bn}, not {value}")
+            raise ValueError(f"subPath should be {bn}, not {value}")
+        return value
 
 
 class HPASchema(LenientSchema):
-    @post_load
-    def finalize(self, data, **kwargs):
-        if "targetCPUUtilizationPercentage" in data:
-            raise ValidationError(
+    @model_validator(mode="after")
+    def finalize(self) -> "HPASchema":
+        if "targetCPUUtilizationPercentage" in (self.model_extra or {}):
+            raise ValueError(
                 "you should remove targetCPUUtilizationPercentage from hpa, and use hpa.metrics"
             )
-        return data
+        return self
 
 
-class ResourceSchema(Schema):
-    cpu = Raw(required=True)
-    memory = Raw(required=True)
+class ResourceSchema(StrictSchema):
+    cpu: Any
+    memory: Any
 
 
-class ResourcesSchema(Schema):
-    requests = Nested(ResourceSchema, required=True)
-    limits = Nested(ResourceSchema, required=True)
+class ResourcesSchema(StrictSchema):
+    requests: ResourceSchema
+    limits: ResourceSchema
 
 
 # env 的 key, value 必须是字符串, 否则 helm 会转为科学记数法
 # https://github.com/helm/helm/issues/6867
-env_schema = Dict(keys=Str(), values=Str(), allow_none=True)
+env_schema = dict[str, str] | None
 
 
 class ProcSchema(LenientSchema):
-    env = env_schema
-    resources = Nested(ResourcesSchema, required=False)
-    command = List(Str, required=True)
+    env: env_schema = None
+    resources: ResourcesSchema | None = None
+    command: list[str]
 
-    @validates("command")
-    def validate_command(self, value):
+    @field_validator("command")
+    @classmethod
+    def validate_command(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("command should not be empty")
         executable = value[0]
         if " " in executable:
             # in principle, this check is 'wrong', linux executable name can
             # contain spaces. but in reality nobody does that, so lets add this
             # check to prevent dumb mistakes
-            raise ValidationError(
+            raise ValueError(
                 f"executable name should not contain space, use list instead, got: {executable}"
             )
+        return value
 
 
 class DeploymentSchema(ProcSchema):
-    hpa = Nested(HPASchema, required=False)
-    containerPort = Int(required=False)
-    readinessProbe = Raw(load_default={})
-    replicaCount = Int(required=True)
-    resources = Nested(ResourcesSchema, required=True)
+    hpa: HPASchema | None = None
+    containerPort: int | None = None
+    readinessProbe: Any = PydanticField(default_factory=dict)
+    replicaCount: int
+    resources: ResourcesSchema | None = None
 
-    @post_load
-    def finalize(self, data, **kwargs):
-        if "containerPort" in data and "readinessProbe" not in data:
-            raise ValidationError(
+    @model_validator(mode="after")
+    def finalize(self) -> "DeploymentSchema":
+        if self.resources is None:
+            raise ValueError("Field required")
+        if self.containerPort is not None and self.readinessProbe is None:
+            raise ValueError(
                 "when containerPort is defined, you must use readinessProbe as well"
             )
-        return data
+        return self
 
 
 class JobSchema(ProcSchema):
-    initContainers = List(Nested(ProcSchema))
+    initContainers: list[ProcSchema] | None = None
 
 
 class CronjobSchema(ProcSchema):
@@ -2590,9 +2646,9 @@ class CronjobSchema(ProcSchema):
 
 
 class IngressSchema(LenientSchema):
-    host = Str(required=True)
-    deployName = Str(required=True)
-    paths = List(Str, required=True)
+    host: str
+    deployName: str
+    paths: list[str]
 
 
 def get_hosts_dict():
@@ -2609,26 +2665,28 @@ def get_hosts_dict():
     return hosts_dic
 
 
-class HostAliasSchema(Schema):
-    ip = Str(required=True)
-    hostnames = List(Str, required=True)
+class HostAliasSchema(StrictSchema):
+    ip: str
+    hostnames: list[str]
 
 
 class ClusterConfigSchema(LenientSchema):
-    domain = Str(load_default="", allow_none=False)
-    domain_suffix = Str(load_default="", allow_none=False)
-    extra_docs = Str()
-    secrets_env = Dict(keys=Str(), values=Raw(), required=False, allow_none=True)
-    hostAliases = List(Nested(HostAliasSchema), required=False)
+    domain: str = ""
+    domain_suffix: str = ""
+    extra_docs: str | None = None
+    secrets_env: dict[str, Any] | None = None
+    hostAliases: list[HostAliasSchema] | None = None
 
-    @post_load
-    def finalize(self, data, **kwargs):
-        if "extra_docs" in data:
-            data["extra_docs"] = data["extra_docs"].strip()
+    @model_validator(mode="after")
+    def finalize(self, info: ValidationInfo) -> "ClusterConfigSchema":
+        if self.extra_docs is not None:
+            self.extra_docs = self.extra_docs.strip()
 
-        if self.context.get("is_current", False):
+        is_current = bool(info.context and info.context.get("is_current", False))
+        if is_current:
             # only read secrets env when dealing with the current cluster
-            secrets_env = data.pop("secrets_env", None) or {}
+            secrets_env = self.secrets_env or {}
+            extra = self.ensure_model_extra()
             for dest, env in secrets_env.items():
                 if isinstance(env, str):
                     env_name = env
@@ -2643,9 +2701,10 @@ class ClusterConfigSchema(LenientSchema):
                         exit=1,
                     )
                 else:
-                    data[dest] = ENV[env_name]
+                    extra[dest] = ENV[env_name]
+            self.secrets_env = None
 
-        return data
+        return self
 
 
 class HelmValuesSchema(LenientSchema):
@@ -2654,91 +2713,163 @@ class HelmValuesSchema(LenientSchema):
     """
 
     # app config goes here
-    appname = Str(validate=ReservedWord, required=True)
-    releaseName = Str(validate=ReservedWord, required=False)
-    env = env_schema
-    volumeMounts = List(Nested(VolumeMountSchema), allow_none=True)
-    deployments = deploy = deployment = Dict(
-        keys=Str(validate=ReservedWord),
-        values=Nested(DeploymentSchema),
-        required=False,
-        allow_none=True,
+    appname: str
+    releaseName: str | None = None
+    env: env_schema = None
+    volumeMounts: list[VolumeMountSchema] | None = None
+    deployments: dict[str, DeploymentSchema] | None = None
+    deploy: dict[str, DeploymentSchema] | None = None
+    deployment: dict[str, DeploymentSchema] | None = None
+    jobs: dict[str, JobSchema] | None = None
+    job: dict[str, JobSchema] | None = None
+    cronjobs: dict[str, CronjobSchema] | None = None
+    cronjob: dict[str, CronjobSchema] | None = None
+    statefulSets: dict[str, Any] | None = None
+    statefulSet: dict[str, Any] | None = None
+    statefulset: dict[str, Any] | None = None
+    sts: dict[str, Any] | None = None
+    tests: dict[str, Any] | None = None
+    ingresses: list[IngressSchema] | None = None
+    ingress: list[IngressSchema] | None = None
+    ing: list[IngressSchema] | None = None
+    externalIngresses: list[IngressSchema] | None = None
+    externalIngress: list[IngressSchema] | None = None
+    externalIng: list[IngressSchema] | None = None
+    canaryGroups: dict[str, dict[str, str]] | None = None
+    build: BuildSchema | None = None
+    release: ReleaseSchema | None = None
+
+    @field_validator("appname", "releaseName")
+    @classmethod
+    def validate_reserved_word_field(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return validate_reserved_word(value)
+
+    @field_validator(
+        "deployments",
+        "deploy",
+        "deployment",
+        "jobs",
+        "job",
+        "cronjobs",
+        "cronjob",
+        "statefulSets",
+        "statefulSet",
+        "statefulset",
+        "sts",
+        "tests",
+        mode="before",
     )
-    jobs = job = Dict(
-        keys=Str(validate=ReservedWord),
-        values=Nested(JobSchema),
-        required=False,
-        allow_none=True,
-    )
-    cronjobs = cronjob = Dict(
-        keys=Str(validate=ReservedWord),
-        values=Nested(CronjobSchema),
-        required=False,
-        allow_none=True,
-    )
-    statefulSets = statefulSet = statefulset = sts = Dict(
-        keys=Str(validate=ReservedWord), values=Raw(), required=False, allow_none=True
-    )
-    tests = Dict(
-        keys=Str(validate=ReservedWord), values=Raw, required=False, allow_none=True
-    )
-    ingresses = ingress = ing = List(
-        Nested(IngressSchema), required=False, allow_none=True
-    )
-    externalIngresses = externalIngress = externalIng = List(
-        Nested(IngressSchema), required=False
-    )
-    canaryGroups = Dict(
-        keys=Str(),
-        values=Dict(keys=Str(validate=OneOf(INGRESS_CANARY_ANNOTATIONS)), values=Str()),
-        required=False,
-        allow_none=True,
-        load_default=None,
-    )
-    build = Nested(BuildSchema, required=False)
-    release = Nested(ReleaseSchema, required=False)
+    @classmethod
+    def validate_reserved_word_mapping(cls, value: Any) -> Any:
+        return validate_reserved_word_mapping_keys(value)
+
+    @field_validator("canaryGroups", mode="before")
+    @classmethod
+    def validate_canary_groups(cls, value: Any) -> Any:
+        return validate_canary_group_annotations(value)
 
     @staticmethod
-    def merge_aliases(data, key, aliases=()):
-        dic = data.setdefault(key, {}) or {}
+    def merge_aliases(
+        value: dict[str, Any] | None, aliases: tuple[dict[str, Any] | None, ...] = ()
+    ) -> dict[str, Any] | None:
+        has_value = value is not None or any(alias is not None for alias in aliases)
+        merged = deepcopy(value or {})
         for alias in aliases:
-            recursive_update(dic, data.get(alias, {}) or {})
+            recursive_update(merged, alias or {})
+        if has_value:
+            return merged
+        return None
 
-    @post_load
-    def finalize(self, data, **kwargs):
-        self.merge_aliases(data, "deployments", aliases=("deploy", "deployment"))
-        self.merge_aliases(data, "cronjobs", aliases=["cronjob"])
-        self.merge_aliases(
-            data, "statefulSets", aliases=["sts", "statefulSet", "statefulset"]
+    @staticmethod
+    def merge_list_aliases(
+        value: list[Any] | None, aliases: tuple[list[Any] | None, ...] = ()
+    ) -> list[Any] | None:
+        has_value = value is not None or any(alias is not None for alias in aliases)
+        merged = list(value or [])
+        for alias in aliases:
+            if alias:
+                merged.extend(alias)
+        if has_value:
+            return merged
+        return None
+
+    @model_validator(mode="after")
+    def finalize(self) -> "HelmValuesSchema":
+        self.deployments = cast(
+            dict[str, DeploymentSchema] | None,
+            self.merge_aliases(
+                self.deployments, aliases=(self.deploy, self.deployment)
+            ),
+        )
+        self.jobs = cast(
+            dict[str, JobSchema] | None,
+            self.merge_aliases(self.jobs, aliases=(self.job,)),
+        )
+        self.cronjobs = cast(
+            dict[str, CronjobSchema] | None,
+            self.merge_aliases(self.cronjobs, aliases=(self.cronjob,)),
+        )
+        self.statefulSets = self.merge_aliases(
+            self.statefulSets,
+            aliases=(self.sts, self.statefulSet, self.statefulset),
+        )
+        self.ingresses = cast(
+            list[IngressSchema] | None,
+            self.merge_list_aliases(self.ingresses, aliases=(self.ingress, self.ing)),
+        )
+        self.externalIngresses = cast(
+            list[IngressSchema] | None,
+            self.merge_list_aliases(
+                self.externalIngresses,
+                aliases=(self.externalIngress, self.externalIng),
+            ),
         )
         for k in ["deployments", "cronjobs", "statefulSets", "tests"]:
-            if not data.get(k):
-                data[k] = {}
+            if not getattr(self, k):
+                setattr(self, k, {})
 
-        data["procs"] = data["deployments"].copy()
-        data["procs"].update(data["cronjobs"])
-        data["procs"].update(data["statefulSets"])
+        procs = cast(dict[str, Any], (self.deployments or {}).copy())
+        procs.update(self.cronjobs or {})
+        procs.update(self.statefulSets or {})
         # check for duplicate proc names
-        deploy_names = set(data["deployments"] or [])
-        cronjob_names = set(data["cronjobs"] or [])
-        sts_names = set(data["statefulSets"] or [])
+        deploy_names = set(self.deployments or [])
+        cronjob_names = set(self.cronjobs or [])
+        sts_names = set(self.statefulSets or [])
         duplicated_names = [
             deploy_names.intersection(cronjob_names),
             deploy_names.intersection(sts_names),
             cronjob_names.intersection(sts_names),
         ]
         if any(duplicated_names):
-            raise ValidationError(
-                f"proc names should not duplicate: {duplicated_names}"
-            )
-        release_clause = data.get("release")
-        if release_clause:
-            build_clause = data.get("build")
-            if not build_clause:
-                raise ValidationError("release defined, but not build")
-            release_clause.setdefault("dest_base", build_clause["base"])
+            raise ValueError(f"proc names should not duplicate: {duplicated_names}")
+        if self.release:
+            if not self.build:
+                raise ValueError("release defined, but not build")
+            if self.release.dest_base is None:
+                self.release.dest_base = self.build.base
 
-        return data
+        self.ensure_model_extra()["procs"] = procs
+        return self
+
+
+for schema in (
+    PrepareSchema,
+    BuildSchema,
+    ReleaseSchema,
+    VolumeMountSchema,
+    HPASchema,
+    ProcSchema,
+    DeploymentSchema,
+    JobSchema,
+    CronjobSchema,
+    IngressSchema,
+    ClusterConfigSchema,
+    HelmValuesSchema,
+):
+    for name, field in schema.model_fields.items():
+        RESERVED_WORDS.add(field.alias or name)
 
 
 def validate_proc_name(ctx, param, value):
@@ -2807,9 +2938,8 @@ def load_helm_values(
             values = yalo(f)
 
     update_extra_values(values)
-    schema = HelmValuesSchema()
     try:
-        loaded = cast(dict[str, Any], schema.load(values))
+        loaded = HelmValuesSchema.load(values)
     except ValidationError as e:
         error("your values.yaml did not pass schema check:")
         error(e, exit=1)
@@ -3414,9 +3544,8 @@ def tell_cluster_config(
     data = yalo(open(values_file))
     # cluster values can be overridden in values.yaml
     update_extra_values(data, cluster=cluster, ignore_extra=True)
-    schema = ClusterConfigSchema(context={"is_current": is_current})
     try:
-        cc = cast(dict[str, Any], schema.load(data))
+        cc = ClusterConfigSchema.load(data, context={"is_current": is_current})
     except ValidationError as e:
         error("your cluster config did not pass schema check:")
         error(e, exit=1)
