@@ -1050,6 +1050,110 @@ def pick_job_pod(appname: str, job_name: str | None = None) -> str | None:
     return pick_pod(phase="Running", selector=selector)
 
 
+def tell_latest_kubectl_event(kind: str, name: str) -> str | None:
+    res = kubectl(
+        "get",
+        "events",
+        "-o=json",
+        f"--field-selector=involvedObject.kind={kind},involvedObject.name={name}",
+        capture_output=True,
+        check=False,
+        timeout=5,
+    )
+    if rc(res) or not res.stdout:
+        return None
+
+    items = jalo(res.stdout).get("items") or []
+    if not items:
+        return None
+
+    def event_sort_key(item: dict[str, Any]) -> str:
+        metadata = item.get("metadata") or {}
+        return (
+            item.get("eventTime")
+            or item.get("lastTimestamp")
+            or metadata.get("creationTimestamp")
+            or ""
+        )
+
+    latest = max(items, key=event_sort_key)
+    reason = latest.get("reason")
+    message = latest.get("message")
+    if reason and message:
+        return f"{reason}: {message}"
+    return reason or message
+
+
+def tell_pod_status_text(pod_name: str) -> str | None:
+    res = kubectl(
+        "get", "po", pod_name, "-o=json", capture_output=True, check=False, timeout=5
+    )
+    if rc(res) or not res.stdout:
+        return None
+
+    pod = jalo(res.stdout)
+    status = pod.get("status") or {}
+    phase = status.get("phase") or "Unknown"
+    container_statuses = status.get("containerStatuses") or []
+    try:
+        container_status = container_statuses[0]
+    except IndexError:
+        return phase
+
+    state = container_status.get("state") or {}
+    terminated = state.get("terminated") or {}
+    if terminated:
+        details = []
+        reason = terminated.get("reason")
+        exit_code = terminated.get("exitCode")
+        signal = terminated.get("signal")
+        if reason:
+            details.append(reason)
+        if exit_code is not None:
+            details.append(f"exit code {exit_code}")
+        elif signal is not None:
+            details.append(f"signal {signal}")
+        if details:
+            return f"{phase} ({', '.join(details)})"
+        return phase
+
+    waiting = state.get("waiting") or {}
+    if waiting:
+        reason = waiting.get("reason")
+        if reason:
+            return f"{phase} ({reason})"
+        return phase
+
+    return phase
+
+
+def tell_interactive_job_exit_message(
+    appname: str, job_name: str, command: tuple[str, ...]
+) -> str:
+    running_pod_name = pick_job_pod(appname, job_name=job_name)
+    if running_pod_name:
+        return (
+            f"job {job_name} is still running, you can re-attach with:\n"
+            f" k exec -it {running_pod_name} -- {' '.join(command)}"
+        )
+
+    selector = ",".join((f"app.kubernetes.io/name={appname}", f"job-name={job_name}"))
+    latest_pod_name = pick_pod(selector=selector)
+    lines = [f"job {job_name} is no longer re-attachable."]
+    if latest_pod_name:
+        if pod_status_text := tell_pod_status_text(latest_pod_name):
+            lines.append(f"pod {latest_pod_name} is {pod_status_text}")
+        if latest_pod_event := tell_latest_kubectl_event("Pod", latest_pod_name):
+            lines.append(f"latest pod event: {latest_pod_event}")
+    else:
+        lines.append("no running pod found for this job")
+
+    if latest_job_event := tell_latest_kubectl_event("Job", job_name):
+        lines.append(f"latest job event: {latest_job_event}")
+
+    return "\n".join(lines)
+
+
 def enter_job_container(
     ctx: click.Context, job_name_and_command: tuple[str, ...]
 ) -> None:
@@ -1213,23 +1317,19 @@ def run_job_command(
         kubectl("cp", src, f"{pod_name}:/tmp/{remote_dirname}", timeout=None)
 
     if interactive:
-        reattach_hint = (
-            f"job {job_name} is still running, you can re-attach with:\n"
-            f" k exec -it {pod_name} -- {' '.join(command)}"
-        )
         try:
             res = kubectl(
                 "exec", "-it", pod_name, "--", *command, check=False, timeout=None
             )
         except KeyboardInterrupt:
-            echo(reattach_hint)
+            echo(tell_interactive_job_exit_message(appname, job_name, command))
             ctx.exit(130)
             return
         exit_code = rc(res)
         if exit_code == 0:
             try_to_cleanup_job(job_name)
         else:
-            echo(reattach_hint)
+            echo(tell_interactive_job_exit_message(appname, job_name, command))
             ctx.exit(exit_code)
         return
     if wait or isatty:
