@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+import click
 import json
 import shutil
 import subprocess
@@ -35,6 +38,7 @@ from lain_cli.utils import (
     tell_ingress_urls,
     tell_job_names,
     tell_release_name,
+    top_procs,
     user_challenge,
     update_canary_annotations,
     yadu,
@@ -327,6 +331,41 @@ def test_cluster_values_override():
     )
     assert isinstance(cc, ClusterConfigSchema)
     assert getattr(cc, "registry") == fake_registry
+
+
+@pytest.mark.usefixtures("dummy_helm_chart")
+def test_top_procs_does_not_mutate_pydantic_proc_models(monkeypatch):
+    _, values = run_under_click_context(load_helm_values)
+
+    class FakePrometheus:
+        def memory_quantile(self, appname, proc_name):
+            assert appname == DUMMY_APPNAME
+            return 128 * 1024 * 1024
+
+        def cpu_p95(self, appname, proc_name):
+            assert appname == DUMMY_APPNAME
+            return 250, True
+
+    monkeypatch.setattr("lain_cli.prometheus.Prometheus", FakePrometheus)
+    monkeypatch.setattr(
+        "lain_cli.utils.tell_cluster_config",
+        lambda: SimpleNamespace(prometheus="http://prometheus.example"),
+    )
+
+    web_proc = values.procs["web"]
+    with click.Context(click.Command("top-procs"), obj={"values": values}):
+        tops = top_procs(DUMMY_APPNAME)
+
+    assert isinstance(tops["web"], dict)
+    assert (
+        tops["web"]["resources"]["requests"]["cpu"] == web_proc.resources.requests.cpu
+    )
+    assert tops["web"]["memory_top"] == 128 * 1024 * 1024
+    assert tops["web"]["memory_top_str"] == "128Mi"
+    assert tops["web"]["cpu_top"] == 250
+    assert "memory_top" not in (web_proc.model_extra or {})
+    assert "memory_top_str" not in (web_proc.model_extra or {})
+    assert "cpu_top" not in (web_proc.model_extra or {})
 
 
 def test_cluster_config_schema_current_cluster_resolves_secrets_env(mocker):

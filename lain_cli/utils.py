@@ -2680,14 +2680,19 @@ def top_procs(appname):
         cpu_top, accurate = prometheus.cpu_p95(appname, proc_name)
         if not accurate:
             continue
-        proc.update(
+        proc_data = (
+            proc.model_dump(mode="python", exclude_none=True)
+            if hasattr(proc, "model_dump")
+            else deepcopy(proc)
+        )
+        proc_data.update(
             {
                 "memory_top": memory_top,
                 "memory_top_str": memory_top_str,
                 "cpu_top": cpu_top,
             }
         )
-        result[proc_name] = proc
+        result[proc_name] = proc_data
 
     return result
 
